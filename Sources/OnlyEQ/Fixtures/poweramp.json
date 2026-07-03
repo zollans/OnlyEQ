@@ -1,0 +1,12 @@
+[{
+  "name": "PA-CEQ 3 Parametric",
+  "preamp": -5.6,
+  "parametric": true,
+  "bands": [
+    { "type": 0, "channels": 0, "frequency": 90, "q": 0.0, "gain": 0.0, "color": 0 },
+    { "type": 1, "channels": 0, "frequency": 10000, "q": 0.0, "gain": 0.0, "color": 0 },
+    { "type": 3, "channels": 0, "frequency": 102, "q": 0.95538557, "gain": -1.4425193, "color": -7829368 },
+    { "type": 0, "channels": 0, "frequency": 22, "q": 0.608, "gain": 5.52, "color": 0 },
+    { "type": 1, "channels": 0, "frequency": 16000, "q": 0.489, "gain": -1.87, "color": 0 }
+  ]
+}]

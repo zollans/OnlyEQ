@@ -1,0 +1,14 @@
+{
+  "apo": {
+    "15": "Preamp: -5.7 dB\nFilter 1: ON LSC Fc 22 Hz Gain 5.52 dB Q 0.608\nFilter 2: ON PK Fc 102 Hz Gain -1.44 dB Q 0.955",
+    "10": "Preamp: -8.3 dB\nFilter 1: ON LSC Fc 20 Hz Gain 8.09 dB Q 0.510"
+  },
+  "filters": [
+    {"type": "LSC", "f0": 22.2, "gain": 5.517, "Q": 0.6076},
+    {"type": "PK", "f0": 102.0, "gain": -1.4425, "Q": 0.9554},
+    {"type": "PK", "f0": 2405.9, "gain": 2.61, "Q": 1.5892},
+    {"type": "HSC", "f0": 15999.8, "gain": -1.872, "Q": 0.489}
+  ],
+  "pref": null, "center": null,
+  "gain": 5.512455953638873
+}
