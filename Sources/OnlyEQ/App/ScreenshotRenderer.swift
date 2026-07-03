@@ -28,19 +28,16 @@ enum ScreenshotRenderer {
         var failures = 0
         failures += capture(
             canvas(PopoverView().environmentObject(state).frame(width: 360), panelRadius: 16),
-            size: NSSize(width: 560, height: 620),
             to: dir.appendingPathComponent("popover.png")
         ) ? 0 : 1
 
         failures += capture(
-            canvas(windowChrome(EditorView().environmentObject(state).frame(width: 840, height: 540)), panelRadius: 12),
-            size: NSSize(width: 960, height: 680),
+            canvas(windowChrome(EditorView().environmentObject(state).frame(width: 840, height: 540), width: 840), panelRadius: 12),
             to: dir.appendingPathComponent("editor.png")
         ) ? 0 : 1
 
         failures += capture(
-            canvas(windowChrome(ImportSheet().environmentObject(state)), panelRadius: 12),
-            size: NSSize(width: 720, height: 620),
+            canvas(windowChrome(ImportSheet().environmentObject(state), width: 560), panelRadius: 12),
             to: dir.appendingPathComponent("import.png")
         ) ? 0 : 1
 
@@ -51,28 +48,33 @@ enum ScreenshotRenderer {
     // MARK: - Styling
 
     /// Gradient backdrop with the content floating on a shadowed panel.
-    private static func canvas(_ content: some View, panelRadius: CGFloat) -> some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.19, green: 0.20, blue: 0.24), Color(red: 0.10, green: 0.10, blue: 0.13)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
+    /// Equal margins on all sides by construction — the capture window sizes
+    /// itself from this view's fitting size.
+    private static func canvas(_ content: some View, panelRadius: CGFloat, margin: CGFloat = 64) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                    .fill(Color(red: 0.115, green: 0.115, blue: 0.125))
             )
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                        .fill(Color(red: 0.115, green: 0.115, blue: 0.125))
+            .clipShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 28, y: 14)
+            .padding(margin)
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.19, green: 0.20, blue: 0.24), Color(red: 0.10, green: 0.10, blue: 0.13)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
                 )
-                .clipShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.5), radius: 28, y: 14)
-        }
+            )
     }
 
-    /// Fake macOS title bar (traffic lights) above the content.
-    private static func windowChrome(_ content: some View) -> some View {
+    /// Fake macOS title bar (traffic lights) above the content. The explicit
+    /// width matters: the Spacer in the title row would otherwise expand the
+    /// panel to fill the whole canvas.
+    private static func windowChrome(_ content: some View, width: CGFloat) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
                 Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34)).frame(width: 11, height: 11)
@@ -84,6 +86,7 @@ enum ScreenshotRenderer {
             .padding(.vertical, 10)
             content
         }
+        .frame(width: width)
     }
 
     // MARK: - Offscreen capture
@@ -97,7 +100,9 @@ enum ScreenshotRenderer {
     /// Render in a real NSWindow (positioned far off-screen, but key, so
     /// AppKit-backed controls draw with their active tint), then snapshot the
     /// view hierarchy at Retina scale.
-    private static func capture(_ view: some View, size: NSSize, to url: URL) -> Bool {
+    private static func capture(_ view: some View, to url: URL) -> Bool {
+        let hosting = NSHostingController(rootView: view.environment(\.colorScheme, .dark))
+        let size = hosting.view.fittingSize
         let window = KeyableWindow(
             contentRect: NSRect(origin: NSPoint(x: -4000, y: -4000), size: size),
             styleMask: [.borderless],
@@ -105,9 +110,7 @@ enum ScreenshotRenderer {
         )
         window.appearance = NSAppearance(named: .darkAqua)
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(
-            rootView: view.environment(\.colorScheme, .dark).frame(width: size.width, height: size.height)
-        )
+        window.contentViewController = hosting
         window.setContentSize(size)
         window.setFrameOrigin(NSPoint(x: -4000, y: -4000))
         window.makeKeyAndOrderFront(nil)
