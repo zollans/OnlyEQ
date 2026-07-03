@@ -61,4 +61,17 @@ swift run OnlyEQ --screenshots out/   # renders the README screenshots
 
 Tests run inside the binary because the Command Line Tools don't ship XCTest. Diagnostics land in `~/Library/Logs/OnlyEQ.log`.
 
-Free, no license, do whatever you want with it.
+## Credits
+
+OnlyEQ stands on a lot of other people's work, and it's only fair to say what came from where:
+
+- [SoundMax](https://github.com/snap-sites/SoundMax) (and the [SoundMaxx](https://github.com/brimell/SoundMaxx) fork) was the direct inspiration — a native menu bar EQ for the Mac. OnlyEQ started as "that, but without the BlackHole dependency."
+- The feature set borrows liberally from the apps that got these things right first: [eqMac](https://eqmac.app) (in-app AutoEq browsing), [SoundSource](https://rogueamoeba.com/soundsource/) (quick device switching, per-device behavior), and [FineTune](https://github.com/ronitsingh10/FineTune) (the per-app exclude list as the escape hatch for DAWs).
+- Headphone correction data comes from [AutoEq](https://github.com/jaakkopasanen/AutoEq) by Jaakko Pasanen and from [peqdb.com](https://peqdb.com) — the in-app browser fetches straight from both. The presets themselves build on measurements by oratory1990 and the many reviewers whose data those databases aggregate. None of that data is mine; it belongs to those projects and people.
+- The filter math is Robert Bristow-Johnson's [Audio EQ Cookbook](https://www.w3.org/TR/audio-eq-cookbook/), used by basically every parametric EQ in existence.
+- The capture approach uses Apple's Core Audio process tap API; [AudioCap](https://github.com/insidegui/AudioCap) by Guilherme Rambo was the best public documentation of how it fits together.
+- Import formats were reverse-engineered from public exports and docs of [Equalizer APO](https://sourceforge.net/projects/equalizerapo/), [Wavelet](https://pittvandewitt.github.io/Wavelet/), Poweramp, [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/), [REW](https://www.roomeqwizard.com), the [OPRA project](https://github.com/opra-project/OPRA), and eqMac.
+
+## License
+
+Public domain, under [The Unlicense](LICENSE). Do whatever you want with it — no attribution required.
