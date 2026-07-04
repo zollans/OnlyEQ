@@ -35,6 +35,14 @@ struct EditorView: View {
                 ForEach(state.store.allPresets) { preset in
                     Button(preset.name) { state.apply(preset) }
                 }
+                if !state.store.customPresets.isEmpty {
+                    Divider()
+                    Menu("Delete Preset") {
+                        ForEach(state.store.customPresets) { preset in
+                            Button(preset.name, role: .destructive) { state.store.delete(preset) }
+                        }
+                    }
+                }
             } label: {
                 Text(state.preset.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
             }

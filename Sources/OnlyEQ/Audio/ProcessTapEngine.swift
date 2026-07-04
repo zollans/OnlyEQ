@@ -84,7 +84,14 @@ final class ProcessTapEngine {
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceMainSubDeviceKey: deviceUID,
             kAudioAggregateDeviceSubDeviceListKey: [
-                [kAudioSubDeviceUIDKey: deviceUID]
+                [
+                    kAudioSubDeviceUIDKey: deviceUID,
+                    // Exclude the device's input side (e.g. a Bluetooth
+                    // headset's mic) from the aggregate — otherwise running
+                    // our IOProc counts as microphone access and macOS shows
+                    // a mic permission prompt when such a device connects.
+                    kAudioSubDeviceInputChannelsKey: 0,
+                ]
             ],
             kAudioAggregateDeviceTapListKey: [
                 [
