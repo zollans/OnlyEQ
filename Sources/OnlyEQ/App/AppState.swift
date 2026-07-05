@@ -78,6 +78,11 @@ final class AppState: ObservableObject {
     private var deviceListenerInstalled = false
     private var silenceCheckTimer: Timer?
 
+    /// Sticky per-session flag: once the tap has delivered audio we know the
+    /// permission is granted, so engine restarts (device switches, settings
+    /// changes) while playback is paused must not re-raise the banner.
+    private var audioConfirmedThisSession = false
+
     // MARK: - Setup
 
     private init() {
@@ -122,9 +127,11 @@ final class AppState: ObservableObject {
         silenceCheckTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                if self.engine.hasReceivedAudio { self.audioConfirmedThisSession = true }
                 self.suspectedPermissionIssue = self.isEnabled
                     && self.engineState == .running
                     && !self.engine.hasReceivedAudio
+                    && !self.audioConfirmedThisSession
             }
         }
     }
@@ -178,10 +185,16 @@ final class AppState: ObservableObject {
     }
 
     private func applyDeviceProfileIfNeeded() {
-        guard let device = currentDevice,
-              let profile = store.deviceProfiles[device.uid], profile.autoApply,
-              let saved = store.preset(withID: profile.presetID) else { return }
-        preset = saved
+        guard let device = currentDevice else { return }
+        if let profile = store.deviceProfiles[device.uid], profile.autoApply,
+           let saved = store.resolveProfilePreset(profile) {
+            preset = saved
+        } else {
+            // No usable assignment for the new device — reset to flat rather
+            // than carrying the previous device's EQ across (a headphone
+            // correction curve applied to speakers sounds wrong).
+            preset = .flat
+        }
         presetWasAutoApplied = true
     }
 

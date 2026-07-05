@@ -26,8 +26,6 @@ struct EQCurveView: View {
     var onBandChange: ((UUID, _ frequency: Double, _ gain: Double) -> Void)?
     var onAddBand: ((_ frequency: Double, _ gain: Double) -> Void)?
 
-    @State private var spectrumBars: [Float] = []
-
     private let minF = 20.0, maxF = 20000.0
 
     init(bands: [EQBand], preampDB: Double, interactive: Bool = false, showSpectrum: Bool = true,
@@ -52,16 +50,13 @@ struct EQCurveView: View {
         GeometryReader { geo in
             let size = geo.size
             ZStack {
-                gridAndSpectrum(size: size)
+                gridLayer(size: size)
+                if showSpectrum { SpectrumBarsView(style: spectrumStyle, size: size) }
                 curveLayer(size: size)
                 if interactive { nodeLayer(size: size) }
             }
             .contentShape(Rectangle())
             .gesture(interactive ? doubleClickGesture(size: size) : nil)
-        }
-        .onReceive(Timer.publish(every: 1.0 / 20, on: .main, in: .common).autoconnect()) { _ in
-            guard showSpectrum else { return }
-            spectrumBars = AppState.shared.engine.spectrum.bars()
         }
     }
 
@@ -86,7 +81,7 @@ struct EQCurveView: View {
     // MARK: - Layers
 
     @ViewBuilder
-    private func gridAndSpectrum(size: CGSize) -> some View {
+    private func gridLayer(size: CGSize) -> some View {
         Canvas { ctx, _ in
             // Octave grid lines.
             for f in [31.0, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] {
@@ -101,17 +96,6 @@ struct EQCurveView: View {
             zero.move(to: CGPoint(x: 0, y: y(forDB: 0, size)))
             zero.addLine(to: CGPoint(x: size.width, y: y(forDB: 0, size)))
             ctx.stroke(zero, with: .color(.secondary.opacity(0.25)), lineWidth: 1)
-
-            // Live spectrum bars.
-            if showSpectrum, !spectrumBars.isEmpty {
-                let barWidth = size.width / CGFloat(spectrumBars.count)
-                for (i, level) in spectrumBars.enumerated() {
-                    let h = CGFloat(level) * size.height * spectrumStyle.heightScale
-                    let rect = CGRect(x: CGFloat(i) * barWidth + 1, y: size.height - h,
-                                      width: max(barWidth - 2, 1), height: h)
-                    ctx.fill(Path(rect), with: .color(.secondary.opacity(spectrumStyle.opacity)))
-                }
-            }
         }
     }
 
@@ -186,6 +170,37 @@ struct EQCurveView: View {
             let f = min(max(frequency(atX: value.location.x, size), minF), maxF)
             let g = min(max(dB(atY: value.location.y, size), -rangeDB), rangeDB)
             onAddBand?((f * 10).rounded() / 10, (g * 10).rounded() / 10)
+        }
+    }
+}
+
+/// Live spectrum bars in their own TimelineView-driven Canvas: the periodic
+/// refresh redraws only this layer, instead of re-evaluating the whole curve
+/// view (grid, response curve, drag nodes) 20× per second like the old
+/// Timer + @State approach did.
+private struct SpectrumBarsView: View {
+    var style: EQCurveView.SpectrumStyle
+    var size: CGSize
+
+    private let spectrum = AppState.shared.engine.spectrum
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 20)) { timeline in
+            // Read the date and capture it in the Canvas closure — otherwise
+            // SwiftUI sees no dependency on the schedule and never redraws.
+            let date = timeline.date
+            Canvas { ctx, _ in
+                _ = date
+                let bars = spectrum.bars()
+                guard !bars.isEmpty else { return }
+                let barWidth = size.width / CGFloat(bars.count)
+                for (i, level) in bars.enumerated() {
+                    let h = CGFloat(level) * size.height * style.heightScale
+                    let rect = CGRect(x: CGFloat(i) * barWidth + 1, y: size.height - h,
+                                      width: max(barWidth - 2, 1), height: h)
+                    ctx.fill(Path(rect), with: .color(.secondary.opacity(style.opacity)))
+                }
+            }
         }
     }
 }

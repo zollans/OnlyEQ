@@ -26,6 +26,14 @@ final class PresetStore: ObservableObject {
         return allPresets.first { $0.id == id }
     }
 
+    /// Resolve a device profile's preset: by ID first, then by name — profiles
+    /// saved before built-ins had stable IDs reference UUIDs that no longer exist.
+    func resolveProfilePreset(_ profile: DeviceProfile) -> EQPreset? {
+        if let byID = preset(withID: profile.presetID) { return byID }
+        guard let name = profile.presetName else { return nil }
+        return allPresets.first { $0.name == name }
+    }
+
     func save(_ preset: EQPreset) {
         if let i = customPresets.firstIndex(where: { $0.id == preset.id }) {
             customPresets[i] = preset

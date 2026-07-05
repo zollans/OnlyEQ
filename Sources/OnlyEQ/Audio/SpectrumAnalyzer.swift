@@ -14,6 +14,27 @@ final class SpectrumAnalyzer {
                                     radix: .radix2, ofType: DSPSplitComplex.self)
     private var sampleRate: Double = 48000
 
+    // Scratch buffers reused across `bars()` calls (UI thread only), so the
+    // periodic spectrum refresh never allocates.
+    private let window: [Float]
+    private var windowed: [Float]
+    private var real: [Float]
+    private var imag: [Float]
+    private var magnitudes: [Float]
+    private var barsOut: [Float]
+
+    init() {
+        let n = Self.fftSize
+        var hann = [Float](repeating: 0, count: n)
+        vDSP_hann_window(&hann, vDSP_Length(n), Int32(vDSP_HANN_NORM))
+        window = hann
+        windowed = [Float](repeating: 0, count: n)
+        real = [Float](repeating: 0, count: n / 2)
+        imag = [Float](repeating: 0, count: n / 2)
+        magnitudes = [Float](repeating: 0, count: n / 2)
+        barsOut = [Float](repeating: 0, count: Self.barCount)
+    }
+
     func configure(sampleRate: Double) {
         self.sampleRate = sampleRate
     }
@@ -37,17 +58,12 @@ final class SpectrumAnalyzer {
     /// UI thread: 0…1 magnitudes for `barCount` log-spaced bands, 20 Hz – 20 kHz.
     func bars() -> [Float] {
         guard let fftSetup else { return [] }
-        let samples = ring.withLock { $0 }
 
         let n = Self.fftSize
-        var windowed = [Float](repeating: 0, count: n)
-        var window = [Float](repeating: 0, count: n)
-        vDSP_hann_window(&window, vDSP_Length(n), Int32(vDSP_HANN_NORM))
-        vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(n))
+        ring.withLock { samples in
+            vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(n))
+        }
 
-        var real = [Float](repeating: 0, count: n / 2)
-        var imag = [Float](repeating: 0, count: n / 2)
-        var magnitudes = [Float](repeating: 0, count: n / 2)
         real.withUnsafeMutableBufferPointer { rp in
             imag.withUnsafeMutableBufferPointer { ip in
                 var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
@@ -62,7 +78,6 @@ final class SpectrumAnalyzer {
         }
 
         let binWidth = Float(sampleRate) / Float(n)
-        var bars = [Float](repeating: 0, count: Self.barCount)
         let logLo = log10(Float(20)), logHi = log10(Float(20000))
         for bar in 0..<Self.barCount {
             let f0 = pow(10, logLo + (logHi - logLo) * Float(bar) / Float(Self.barCount))
@@ -72,8 +87,8 @@ final class SpectrumAnalyzer {
             for bin in lo...hi { peak = max(peak, magnitudes[bin]) }
             // Map to dBFS, normalized -60…0 dB → 0…1.
             let db = 20 * log10(max(peak / Float(n), 1e-9))
-            bars[bar] = min(max((db + 60) / 60, 0), 1)
+            barsOut[bar] = min(max((db + 60) / 60, 0), 1)
         }
-        return bars
+        return barsOut
     }
 }

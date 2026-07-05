@@ -32,7 +32,13 @@ cp "$BIN" "$APP/Contents/MacOS/OnlyEQ"
 [ -d "$RESOURCE_BUNDLE" ] && cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
-# Ad-hoc sign so TCC (System Audio Recording) can track the app identity.
-codesign --force --sign - "$APP"
+# Ad-hoc sign with an explicit identifier-based designated requirement. A plain
+# ad-hoc signature gets a cdhash-based requirement that changes on every build,
+# so TCC (System Audio Recording) forgets the grant and re-prompts after each
+# rebuild. Pinning the requirement to the bundle identifier keeps the grant.
+codesign --force --sign - \
+    --identifier com.onlyeq.app \
+    --requirements '=designated => identifier "com.onlyeq.app"' \
+    "$APP"
 
 echo "Built $APP"

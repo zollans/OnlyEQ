@@ -69,18 +69,22 @@ struct EQPreset: Identifiable, Codable, Equatable {
     /// Where the preset came from, e.g. "AutoEq parametric", "peqdb", "Imported file".
     var source: String?
 
-    static let flat = EQPreset(name: "Flat")
+    // Built-ins carry fixed IDs so device profiles that reference them keep
+    // resolving across launches (a fresh UUID() per launch would break them).
+    static let flat = EQPreset(id: UUID(uuidString: "6F6C7945-5100-4000-8000-000000000001")!, name: "Flat")
 
     /// A gentle Harman-style bass+treble curve as a friendly built-in.
     static let builtIns: [EQPreset] = [
         .flat,
-        EQPreset(name: "Harman Target", preampDB: -4, bands: [
+        EQPreset(id: UUID(uuidString: "6F6C7945-5100-4000-8000-000000000002")!,
+                 name: "Harman Target", preampDB: -4, bands: [
             EQBand(type: .lowShelf, frequency: 105, gain: 4.0, q: 0.71),
             EQBand(type: .peak, frequency: 200, gain: -1.0, q: 1.0),
             EQBand(type: .peak, frequency: 3000, gain: 2.0, q: 1.2),
             EQBand(type: .highShelf, frequency: 10000, gain: 1.5, q: 0.71),
         ], source: "Built-in"),
-        EQPreset(name: "Late Night", preampDB: -2, bands: [
+        EQPreset(id: UUID(uuidString: "6F6C7945-5100-4000-8000-000000000003")!,
+                 name: "Late Night", preampDB: -2, bands: [
             EQBand(type: .lowShelf, frequency: 120, gain: -4.0, q: 0.71),
             EQBand(type: .peak, frequency: 2500, gain: 2.0, q: 1.0),
             EQBand(type: .highShelf, frequency: 9000, gain: -2.0, q: 0.71),
