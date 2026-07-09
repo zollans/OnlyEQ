@@ -69,6 +69,13 @@ final class AppState: ObservableObject {
     /// Set when the current preset was auto-applied by a device profile.
     @Published private(set) var presetWasAutoApplied = false
 
+    /// True only while the popover / editor window is actually on screen.
+    /// The popover's content controller and the editor window both outlive
+    /// their close (they're just ordered out), so spectrum/meter TimelineViews
+    /// gate on these to stop ticking once nothing is visible.
+    @Published var popoverIsVisible = false
+    @Published var editorIsVisible = false
+
     var effectivePreampDB: Double {
         autoPreampEnabled ? EQResponse.autoPreamp(bands: preset.bands) : preset.preampDB
     }

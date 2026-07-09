@@ -104,6 +104,7 @@ struct EditorView: View {
                 bands: state.preset.bands,
                 preampDB: 0,
                 interactive: true,
+                showSpectrum: state.isEnabled && state.editorIsVisible,
                 showIndividualCurves: true,
                 selectedBandID: $selectedBandID,
                 onBandChange: { id, f, g in
@@ -207,18 +208,29 @@ struct EditorView: View {
         .padding(.vertical, 8)
     }
 
+    // The window survives close (only ordered out), so the meter's timer is
+    // gated on real visibility — otherwise it would tick forever after the
+    // window is first shown.
+    @ViewBuilder
     private var clipIndicator: some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            let peak = state.engine.processor.currentPeak
-            let db = peak > 0 ? 20 * log10(Double(peak)) : -60
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(db > -0.1 ? Color.red : (db > -3 ? .orange : .green))
-                    .frame(width: 7, height: 7)
-                Text(String(format: "%.1f dBFS", max(db, -60)))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
+        if state.editorIsVisible {
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                clipReadout(peak: state.engine.processor.currentPeak)
             }
+        } else {
+            clipReadout(peak: 0)
+        }
+    }
+
+    private func clipReadout(peak: Float) -> some View {
+        let db = peak > 0 ? 20 * log10(Double(peak)) : -60
+        return HStack(spacing: 4) {
+            Circle()
+                .fill(db > -0.1 ? Color.red : (db > -3 ? .orange : .green))
+                .frame(width: 7, height: 7)
+            Text(String(format: "%.1f dBFS", max(db, -60)))
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 

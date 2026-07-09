@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
+        popover.delegate = self
         let hosting = NSHostingController(rootView: PopoverView().environmentObject(state))
         // Keep preferredContentSize in sync with the SwiftUI layout — without
         // this the popover mis-sizes and can render clipped past the menu bar.
@@ -147,6 +148,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openSettings() { WindowManager.shared.showSettings() }
 }
 
+// Closing the popover only orders its window out — the hosting controller
+// (and the SwiftUI tree inside) stays alive, so PopoverView gates its
+// spectrum TimelineView on this visibility flag to stop it from ticking
+// forever after the first show.
+extension AppDelegate: NSPopoverDelegate {
+    func popoverDidShow(_ notification: Notification) {
+        AppState.shared.popoverIsVisible = true
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        AppState.shared.popoverIsVisible = false
+    }
+}
+
 /// Owns the editor, settings, and onboarding windows.
 @MainActor
 final class WindowManager {
@@ -172,6 +187,18 @@ final class WindowManager {
             // Restore the saved frame if there is one; otherwise center.
             if !window.setFrameUsingName("EditorWindow") { window.center() }
             window.setFrameAutosaveName("EditorWindow")
+            // The window survives close (isReleasedWhenClosed = false, just
+            // ordered out), so EditorView gates its spectrum/clip TimelineViews
+            // on real visibility. Occlusion state also covers "fully covered
+            // by another window" and "on another Space", not just close.
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: window, queue: .main
+            ) { note in
+                guard let window = note.object as? NSWindow else { return }
+                let visible = window.occlusionState.contains(.visible)
+                Task { @MainActor in AppState.shared.editorIsVisible = visible }
+            }
             editorWindow = window
         }
         if importing { EditorView.importRequested.send() }

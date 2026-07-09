@@ -163,7 +163,8 @@ struct PopoverView: View {
             VStack(spacing: 5) {
                 ZStack(alignment: .topTrailing) {
                     EQCurveView(bands: state.preset.bands, preampDB: 0,
-                                showSpectrum: state.isEnabled, spectrumStyle: .subtle)
+                                showSpectrum: state.isEnabled && state.popoverIsVisible,
+                                spectrumStyle: .subtle)
                         .frame(height: 116)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     Button {
