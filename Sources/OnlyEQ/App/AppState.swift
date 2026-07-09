@@ -75,7 +75,7 @@ final class AppState: ObservableObject {
 
     /// True only while the popover / editor window is actually on screen.
     /// The popover's content controller and the editor window both outlive
-    /// their close (they're just ordered out), so spectrum/meter TimelineViews
+    /// their close (they're just ordered out), so spectrum/meter animations
     /// gate on these to stop ticking once nothing is visible.
     @Published var popoverIsVisible = false { didSet { updateVisualizationState() } }
     @Published var editorIsVisible = false { didSet { updateVisualizationState() } }
@@ -88,6 +88,7 @@ final class AppState: ObservableObject {
 
     private var deviceListenerInstalled = false
     private var silenceCheckTimer: Timer?
+    private var pendingPresetPersistence: DispatchWorkItem?
 
     /// Sticky per-session flag: once the tap has delivered audio we know the
     /// permission is granted, so engine restarts (device switches, settings
@@ -283,6 +284,24 @@ final class AppState: ObservableObject {
 
     private func persistWorkingPreset() {
         guard !Self.screenshotMode else { return }
+        pendingPresetPersistence?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.writeWorkingPreset()
+        }
+        pendingPresetPersistence = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    /// Dragging can publish many preset snapshots per second. Persist only the
+    /// final value, and expose an explicit flush for drag-end and app shutdown.
+    func flushWorkingPresetPersistence() {
+        guard !Self.screenshotMode else { return }
+        pendingPresetPersistence?.cancel()
+        pendingPresetPersistence = nil
+        writeWorkingPreset()
+    }
+
+    private func writeWorkingPreset() {
         if let data = try? JSONEncoder().encode(preset) {
             UserDefaults.standard.set(data, forKey: "workingPreset")
         }

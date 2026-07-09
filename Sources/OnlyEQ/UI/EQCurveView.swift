@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import QuartzCore
 
 enum BandPalette {
     static let colors: [Color] = [.blue, .teal, .purple, .pink, .orange, .green, .indigo, .mint, .red, .cyan]
@@ -24,6 +26,7 @@ struct EQCurveView: View {
     var rangeDB: Double = 12
     @Binding var selectedBandID: UUID?
     var onBandChange: ((UUID, _ frequency: Double, _ gain: Double) -> Void)?
+    var onBandDragEnded: (() -> Void)?
     var onAddBand: ((_ frequency: Double, _ gain: Double) -> Void)?
 
     private let minF = 20.0, maxF = 20000.0
@@ -33,6 +36,7 @@ struct EQCurveView: View {
          showIndividualCurves: Bool = false, rangeDB: Double = 12,
          selectedBandID: Binding<UUID?> = .constant(nil),
          onBandChange: ((UUID, Double, Double) -> Void)? = nil,
+         onBandDragEnded: (() -> Void)? = nil,
          onAddBand: ((Double, Double) -> Void)? = nil) {
         self.bands = bands
         self.preampDB = preampDB
@@ -43,6 +47,7 @@ struct EQCurveView: View {
         self.rangeDB = rangeDB
         self._selectedBandID = selectedBandID
         self.onBandChange = onBandChange
+        self.onBandDragEnded = onBandDragEnded
         self.onAddBand = onAddBand
     }
 
@@ -51,7 +56,7 @@ struct EQCurveView: View {
             let size = geo.size
             ZStack {
                 gridLayer(size: size)
-                if showSpectrum { SpectrumBarsView(style: spectrumStyle, size: size) }
+                if showSpectrum { SpectrumBarsView(style: spectrumStyle) }
                 curveLayer(size: size)
                 if interactive { nodeLayer(size: size) }
             }
@@ -145,23 +150,15 @@ struct EQCurveView: View {
     @ViewBuilder
     private func nodeLayer(size: CGSize) -> some View {
         ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
-            let isSelected = selectedBandID == band.id
-            Circle()
-                .fill(BandPalette.color(index))
-                .frame(width: isSelected ? 14 : 11, height: isSelected ? 14 : 11)
-                .overlay(Circle().stroke(.white.opacity(isSelected ? 0.9 : 0.5), lineWidth: isSelected ? 2 : 1))
-                .opacity(band.isEnabled ? 1 : 0.35)
-                .position(x: x(forFrequency: band.frequency, size),
-                          y: y(forDB: min(max(band.gain, -rangeDB), rangeDB), size))
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            selectedBandID = band.id
-                            let f = min(max(frequency(atX: value.location.x, size), minF), maxF)
-                            let g = min(max(dB(atY: value.location.y, size), -rangeDB), rangeDB)
-                            onBandChange?(band.id, f, (g * 10).rounded() / 10)
-                        }
-                )
+            DraggableBandNode(
+                index: index,
+                band: band,
+                size: size,
+                rangeDB: rangeDB,
+                selectedBandID: $selectedBandID,
+                onChange: onBandChange,
+                onEnded: onBandDragEnded
+            )
         }
     }
 
@@ -174,36 +171,214 @@ struct EQCurveView: View {
     }
 }
 
-/// Live spectrum bars in their own TimelineView-driven Canvas: the periodic
-/// refresh redraws only this layer, instead of re-evaluating the whole curve
-/// view (grid, response curve, drag nodes) 20× per second like the old
-/// Timer + @State approach did.
-private struct SpectrumBarsView: View {
+/// Hosts the animated spectrum in an AppKit layer. Updating the layer's path
+/// does not invalidate SwiftUI's editor graph or trigger a window layout pass.
+private struct SpectrumBarsView: NSViewRepresentable {
     var style: EQCurveView.SpectrumStyle
-    var size: CGSize
 
-    private let spectrum = AppState.shared.engine.spectrum
+    func makeNSView(context: Context) -> SpectrumBarsNSView {
+        let view = SpectrumBarsNSView(spectrum: AppState.shared.engine.spectrum)
+        view.configure(style: style)
+        return view
+    }
 
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 20)) { timeline in
-            // Read the date and capture it in the Canvas closure — otherwise
-            // SwiftUI sees no dependency on the schedule and never redraws.
-            let date = timeline.date
-            Canvas { ctx, _ in
-                _ = date
-                let bars = spectrum.bars()
-                guard !bars.isEmpty else { return }
-                let barWidth = size.width / CGFloat(bars.count)
-                var path = Path()
-                for (i, level) in bars.enumerated() {
-                    let h = CGFloat(level) * size.height * style.heightScale
-                    let rect = CGRect(x: CGFloat(i) * barWidth + 1, y: size.height - h,
-                                      width: max(barWidth - 2, 1), height: h)
-                    path.addRect(rect)
-                }
-                ctx.fill(path, with: .color(.secondary.opacity(style.opacity)))
+    func updateNSView(_ view: SpectrumBarsNSView, context: Context) {
+        view.configure(style: style)
+    }
+
+    static func dismantleNSView(_ view: SpectrumBarsNSView, coordinator: ()) {
+        view.stopAnimating()
+    }
+}
+
+@MainActor
+private final class SpectrumBarsNSView: NSView {
+    private let spectrum: SpectrumAnalyzer
+    private let barsLayer = CAShapeLayer()
+    private var animationLink: CADisplayLink?
+    private var targetBars = [Float](repeating: 0, count: SpectrumAnalyzer.barCount)
+    private var displayedBars = [Float](repeating: 0, count: SpectrumAnalyzer.barCount)
+    private var lastAnalysisTime: CFTimeInterval = 0
+    private var barOpacity = 0.10
+    private var heightScale = 0.75
+
+    init(spectrum: SpectrumAnalyzer) {
+        self.spectrum = spectrum
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        barsLayer.actions = ["path": NSNull(), "fillColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(barsLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(style: EQCurveView.SpectrumStyle) {
+        barOpacity = style.opacity
+        heightScale = style.heightScale
+        updateColors()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { stopAnimating() } else { startAnimating() }
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        barsLayer.frame = bounds
+        CATransaction.commit()
+        renderBars(displayedBars)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    func stopAnimating() {
+        animationLink?.invalidate()
+        animationLink = nil
+    }
+
+    private func startAnimating() {
+        guard animationLink == nil else { return }
+        targetBars.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
+        displayedBars.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
+        lastAnalysisTime = 0
+
+        let link = displayLink(target: self, selector: #selector(displayLinkDidFire(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        animationLink = link
+        renderBars(displayedBars)
+    }
+
+    private func updateColors() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        barsLayer.fillColor = NSColor.secondaryLabelColor.withAlphaComponent(barOpacity).cgColor
+        CATransaction.commit()
+    }
+
+    @objc private func displayLinkDidFire(_ link: CADisplayLink) {
+        // FFT/magnitude work stays capped at 30 Hz. The layer interpolates the
+        // latest targets at 60 fps, so motion is smooth without doubling DSP.
+        if lastAnalysisTime == 0 || link.timestamp - lastAnalysisTime >= 1.0 / 30.0 {
+            let bars = spectrum.bars()
+            if bars.count == targetBars.count {
+                for index in bars.indices { targetBars[index] = bars[index] }
+            }
+            lastAnalysisTime = link.timestamp
+        }
+
+        let duration = max(link.duration, 1.0 / 120.0)
+        let blend = Float(1 - exp(-duration / 0.045))
+        var changed = false
+        for index in displayedBars.indices {
+            let delta = targetBars[index] - displayedBars[index]
+            if abs(delta) > 0.0005 {
+                displayedBars[index] += delta * blend
+                changed = true
+            } else {
+                displayedBars[index] = targetBars[index]
             }
         }
+        if changed { renderBars(displayedBars) }
+    }
+
+    private func renderBars(_ bars: [Float]) {
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        guard !bars.isEmpty else { return }
+
+        let barWidth = size.width / CGFloat(bars.count)
+        let path = CGMutablePath()
+        for (index, level) in bars.enumerated() {
+            let height = CGFloat(level) * size.height * heightScale
+            path.addRect(CGRect(x: CGFloat(index) * barWidth + 1, y: 0,
+                                width: max(barWidth - 2, 1), height: height))
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        barsLayer.path = path
+        CATransaction.commit()
+    }
+
+    deinit {
+        animationLink?.invalidate()
+    }
+}
+
+/// Keeps pointer tracking local to a single node. The node follows every mouse
+/// event immediately, while model/audio updates are capped at the display rate
+/// so a high-polling-rate mouse cannot rebuild the entire editor hundreds of
+/// times per second.
+private struct DraggableBandNode: View {
+    let index: Int
+    let band: EQBand
+    let size: CGSize
+    let rangeDB: Double
+    @Binding var selectedBandID: UUID?
+    let onChange: ((UUID, Double, Double) -> Void)?
+    let onEnded: (() -> Void)?
+
+    @State private var dragPosition: CGPoint?
+    @State private var lastModelUpdate: CFTimeInterval = 0
+
+    private let minF = 20.0, maxF = 20000.0
+
+    var body: some View {
+        let isSelected = selectedBandID == band.id
+        Circle()
+            .fill(BandPalette.color(index))
+            .frame(width: isSelected ? 14 : 11, height: isSelected ? 14 : 11)
+            .overlay(Circle().stroke(.white.opacity(isSelected ? 0.9 : 0.5),
+                                     lineWidth: isSelected ? 2 : 1))
+            .opacity(band.isEnabled ? 1 : 0.35)
+            .position(dragPosition ?? CGPoint(x: x(forFrequency: band.frequency),
+                                              y: y(forDB: band.gain)))
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if selectedBandID != band.id { selectedBandID = band.id }
+                    let update = mapped(value.location)
+                    dragPosition = update.position
+
+                    let now = CACurrentMediaTime()
+                    if lastModelUpdate == 0 || now - lastModelUpdate >= 1.0 / 60.0 {
+                        onChange?(band.id, update.frequency, update.gain)
+                        lastModelUpdate = now
+                    }
+                }
+                .onEnded { value in
+                    let update = mapped(value.location)
+                    onChange?(band.id, update.frequency, update.gain)
+                    dragPosition = nil
+                    lastModelUpdate = 0
+                    onEnded?()
+                })
+    }
+
+    private func x(forFrequency frequency: Double) -> CGFloat {
+        CGFloat((log10(frequency) - log10(minF)) / (log10(maxF) - log10(minF))) * size.width
+    }
+
+    private func y(forDB db: Double) -> CGFloat {
+        CGFloat(0.5 - min(max(db, -rangeDB), rangeDB) / (rangeDB * 2)) * size.height
+    }
+
+    private func mapped(_ location: CGPoint) -> (position: CGPoint, frequency: Double, gain: Double) {
+        let px = min(max(location.x, 0), size.width)
+        let py = min(max(location.y, 0), size.height)
+        let frequency = pow(10, log10(minF) + Double(px / size.width) * (log10(maxF) - log10(minF)))
+        let rawGain = (0.5 - Double(py / size.height)) * rangeDB * 2
+        let gain = (min(max(rawGain, -rangeDB), rangeDB) * 10).rounded() / 10
+        return (CGPoint(x: px, y: py), frequency, gain)
     }
 }
 

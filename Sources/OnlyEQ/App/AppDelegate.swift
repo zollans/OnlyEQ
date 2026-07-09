@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AppState.shared.flushWorkingPresetPersistence()
         AppState.shared.engine.stop()
     }
 
@@ -161,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // Closing the popover only orders its window out — the hosting controller
 // (and the SwiftUI tree inside) stays alive, so PopoverView gates its
-// spectrum TimelineView on this visibility flag to stop it from ticking
+// spectrum animation on this visibility flag to stop it from refreshing
 // forever after the first show.
 extension AppDelegate: NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
@@ -199,7 +200,7 @@ final class WindowManager {
             if !window.setFrameUsingName("EditorWindow") { window.center() }
             window.setFrameAutosaveName("EditorWindow")
             // The window survives close (isReleasedWhenClosed = false, just
-            // ordered out), so EditorView gates its spectrum/clip TimelineViews
+            // ordered out), so EditorView gates its spectrum/clip refresh work
             // on real visibility. Occlusion state also covers "fully covered
             // by another window" and "on another Space", not just close.
             NotificationCenter.default.addObserver(

@@ -3,20 +3,22 @@
     <channel>
         <title>OnlyEQ</title>
         <item>
-            <title>1.1.1</title>
-            <pubDate>Thu, 09 Jul 2026 11:08:31 -0700</pubDate>
+            <title>1.1.2</title>
+            <pubDate>Thu, 09 Jul 2026 12:58:12 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.1.1
+            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.1.2
 
-- Adds an About section to Settings showing the installed OnlyEQ version/build and the full macOS version/build.
-- Includes the automatic updater and realtime CPU optimizations introduced in 1.1.0.
-
-Versions 1.0.x do not contain the updater and need one manual installation of 1.1.1. Users already on 1.1.0 can update automatically.
+- Makes the editor spectrum display-linked and smoothly interpolated at 60 fps.
+- Keeps FFT analysis capped at 30 Hz and moves bar drawing into an isolated Core Animation layer, avoiding full SwiftUI editor layout on every frame.
+- Updates the peak meter at 60 Hz using cached text and shape layers, with no redraw when its displayed value is unchanged.
+- Makes EQ node dragging track the pointer immediately while capping model/audio updates at 60 Hz.
+- Coalesces working-preset persistence during dragging and flushes the final value at drag end or app shutdown.
+- Adds a side-effect-free editor profiling mode for performance regression checks.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.1.1/OnlyEQ.app.zip" length="2332812" type="application/octet-stream" sparkle:edSignature="AzC/E/F5huSKPMgrOxmG/sD66+XVeQrcBFzbVFTXVuISBo7/Ufg02lk5L2+TCn0a1JMQVwzZAEw7yJXAAE49Bw=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.1.2/OnlyEQ.app.zip" length="2362639" type="application/octet-stream" sparkle:edSignature="6QbfYMxm/XLq3FWItD/WOO7ULgO72pfV2QNtAgHsoTjtGKJVgPTFkgq85c/XhmuRyuUrPmxZ4j2NZDTrEHWwAQ=="/>
         </item>
     </channel>
 </rss>

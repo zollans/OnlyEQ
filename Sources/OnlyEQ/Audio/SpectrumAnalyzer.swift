@@ -118,9 +118,9 @@ final class SpectrumAnalyzer {
     func bars() -> [Float] {
         guard let fftSetup else { return [] }
 
-        // Popover and editor timelines can fire in the same display cycle. A
-        // short global cache lets both consume one FFT without reducing either
-        // view's 20 Hz refresh rate.
+        // Popover and editor consumers can fire in the same display cycle. A
+        // short global cache lets both share one 30 Hz FFT result while their
+        // presentation layers animate independently.
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastAnalysisTime < Self.analysisReuseInterval { return barsOut }
 

@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import SwiftUI
 
 if CommandLine.arguments.contains("--test") {
     exit(TestRunner.run())
@@ -15,6 +16,37 @@ if let flagIndex = CommandLine.arguments.firstIndex(of: "--screenshots") {
         app.setActivationPolicy(.accessory)
         app.finishLaunching()
         exit(ScreenshotRenderer.run(outputDir: outputDir))
+    }
+}
+
+// Opens the real editor view for a short, side-effect-free UI profiling run.
+// The engine stays off; the process exits automatically after 15 seconds.
+if CommandLine.arguments.contains("--editor-probe") {
+    MainActor.assumeIsolated {
+        AppState.screenshotMode = true
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        app.finishLaunching()
+
+        let state = AppState.shared
+        state.engineState = .running
+        state.editorIsVisible = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 560),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "OnlyEQ UI Probe"
+        window.contentViewController = NSHostingController(
+            rootView: EditorView().environmentObject(state)
+        )
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        app.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { app.terminate(nil) }
+        app.run()
+        exit(0)
     }
 }
 

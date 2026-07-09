@@ -1,5 +1,7 @@
 import SwiftUI
 import Combine
+import AppKit
+import QuartzCore
 
 /// The EQ editor window: toolbar, interactive graph, band strip, bottom bar.
 struct EditorView: View {
@@ -112,6 +114,9 @@ struct EditorView: View {
                     state.preset.bands[i].frequency = f
                     state.preset.bands[i].gain = g
                 },
+                onBandDragEnded: {
+                    state.flushWorkingPresetPersistence()
+                },
                 onAddBand: { f, g in
                     guard state.preset.bands.count < 32 else { return }
                     let band = EQBand(type: .peak, frequency: f, gain: g, q: 1.41)
@@ -208,30 +213,9 @@ struct EditorView: View {
         .padding(.vertical, 8)
     }
 
-    // The window survives close (only ordered out), so the meter's timer is
-    // gated on real visibility — otherwise it would tick forever after the
-    // window is first shown.
-    @ViewBuilder
     private var clipIndicator: some View {
-        if state.editorIsVisible {
-            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-                clipReadout(peak: state.engine.processor.currentPeak)
-            }
-        } else {
-            clipReadout(peak: 0)
-        }
-    }
-
-    private func clipReadout(peak: Float) -> some View {
-        let db = peak > 0 ? 20 * log10(Double(peak)) : -60
-        return HStack(spacing: 4) {
-            Circle()
-                .fill(db > -0.1 ? Color.red : (db > -3 ? .orange : .green))
-                .frame(width: 7, height: 7)
-            Text(String(format: "%.1f dBFS", max(db, -60)))
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
+        PeakMeterView(processor: state.engine.processor, isActive: state.editorIsVisible)
+            .frame(width: 78, height: 14)
     }
 
     private var saveSheet: some View {
@@ -251,6 +235,127 @@ struct EditorView: View {
             }
         }
         .padding(20)
+    }
+}
+
+/// Keeps the display-linked peak readout out of SwiftUI's view graph. Updating this
+/// AppKit view redraws only its 78×14-point bounds instead of the editor.
+private struct PeakMeterView: NSViewRepresentable {
+    let processor: EQProcessor
+    let isActive: Bool
+
+    func makeNSView(context: Context) -> PeakMeterNSView {
+        let view = PeakMeterNSView(processor: processor)
+        view.setActive(isActive)
+        return view
+    }
+
+    func updateNSView(_ view: PeakMeterNSView, context: Context) {
+        view.setActive(isActive)
+    }
+
+    static func dismantleNSView(_ view: PeakMeterNSView, coordinator: ()) {
+        view.stopAnimating()
+    }
+}
+
+@MainActor
+private final class PeakMeterNSView: NSView {
+    private let processor: EQProcessor
+    private let dotLayer = CAShapeLayer()
+    private let textLayer = CATextLayer()
+    private var animationLink: CADisplayLink?
+    private var active = false
+    private var db: Double = -60
+    private var renderedLabel = ""
+    private var renderedColor: NSColor?
+
+    init(processor: EQProcessor) {
+        self.processor = processor
+        super.init(frame: .zero)
+        wantsLayer = true
+        dotLayer.actions = ["path": NSNull(), "fillColor": NSNull()]
+        textLayer.actions = ["string": NSNull(), "foregroundColor": NSNull(),
+                             "bounds": NSNull(), "position": NSNull()]
+        textLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        textLayer.fontSize = 10
+        textLayer.alignmentMode = .left
+        layer?.addSublayer(dotLayer)
+        layer?.addSublayer(textLayer)
+        updateLayers(force: true)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isOpaque: Bool { false }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dotLayer.path = CGPath(ellipseIn: CGRect(x: 0, y: max((bounds.height - 7) / 2, 0),
+                                                 width: 7, height: 7), transform: nil)
+        textLayer.frame = CGRect(x: 11, y: 0, width: max(bounds.width - 11, 0), height: bounds.height)
+        textLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        CATransaction.commit()
+    }
+
+    func setActive(_ active: Bool) {
+        guard self.active != active else { return }
+        self.active = active
+        if active, window != nil {
+            startAnimating()
+        } else {
+            stopAnimating()
+            db = -60
+            updateLayers(force: true)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if active, window != nil { startAnimating() } else { stopAnimating() }
+    }
+
+    private func updateLayers(force: Bool = false) {
+        let color: NSColor = db > -0.1 ? .systemRed : (db > -3 ? .systemOrange : .systemGreen)
+        let label = String(format: "%.1f dBFS", max(db, -60))
+        guard force || label != renderedLabel || color != renderedColor else { return }
+        renderedLabel = label
+        renderedColor = color
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dotLayer.fillColor = color.cgColor
+        textLayer.string = label
+        textLayer.foregroundColor = NSColor.secondaryLabelColor.cgColor
+        CATransaction.commit()
+    }
+
+    func stopAnimating() {
+        animationLink?.invalidate()
+        animationLink = nil
+    }
+
+    private func startAnimating() {
+        guard animationLink == nil else { return }
+        let link = displayLink(target: self, selector: #selector(samplePeak(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        animationLink = link
+        samplePeak(link)
+    }
+
+    @objc private func samplePeak(_ link: CADisplayLink) {
+        let peak = processor.currentPeak
+        db = peak > 0 ? 20 * log10(Double(peak)) : -60
+        updateLayers()
+    }
+
+    deinit {
+        animationLink?.invalidate()
     }
 }
 

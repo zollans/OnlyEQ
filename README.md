@@ -58,9 +58,10 @@ Plain SwiftPM with no Xcode project. Sparkle is the sole package dependency:
 ```sh
 swift run OnlyEQ --test               # self-test suite (importer + DSP)
 swift run OnlyEQ --engine-probe       # headless engine check, prints JSON
+swift run OnlyEQ --editor-probe       # 15-second editor UI profiling run
 swift run OnlyEQ --screenshots out/   # renders the README screenshots
 ./scripts/build-app.sh release        # universal binary release build
-./scripts/prepare-release.sh 1.1.1    # signed archive + appcast
+./scripts/prepare-release.sh 1.1.2    # signed archive + appcast
 ```
 
 Tests run inside the binary because the Command Line Tools don't ship XCTest. Diagnostics land in `~/Library/Logs/OnlyEQ.log`.
