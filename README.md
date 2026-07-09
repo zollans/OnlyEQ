@@ -60,7 +60,7 @@ swift run OnlyEQ --test               # self-test suite (importer + DSP)
 swift run OnlyEQ --engine-probe       # headless engine check, prints JSON
 swift run OnlyEQ --screenshots out/   # renders the README screenshots
 ./scripts/build-app.sh release        # universal binary release build
-./scripts/prepare-release.sh 1.1.0    # signed archive + appcast
+./scripts/prepare-release.sh 1.1.1    # signed archive + appcast
 ```
 
 Tests run inside the binary because the Command Line Tools don't ship XCTest. Diagnostics land in `~/Library/Logs/OnlyEQ.log`.

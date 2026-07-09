@@ -3,30 +3,20 @@
     <channel>
         <title>OnlyEQ</title>
         <item>
-            <title>1.1.0</title>
-            <pubDate>Thu, 09 Jul 2026 11:04:10 -0700</pubDate>
+            <title>1.1.1</title>
+            <pubDate>Thu, 09 Jul 2026 11:08:31 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.1.0
+            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.1.1
 
-This release adds signed automatic updates. After installing 1.1.0, OnlyEQ will check for future releases automatically; you can also right-click the menu-bar icon and choose **Check for Updates…**.
+- Adds an About section to Settings showing the installed OnlyEQ version/build and the full macOS version/build.
+- Includes the automatic updater and realtime CPU optimizations introduced in 1.1.0.
 
-Versions 1.0.x do not contain the updater, so 1.1.0 requires one final manual install.
-
-## Performance
-
-- Stops hidden spectrum capture and peak-meter aggregation at the audio thread, extending 1.0.2's UI visibility gating through the full visualization pipeline.
-- Prevents spectrum frames from triggering a full popover remeasurement and layout pass.
-- Vectorizes spectrum mixing and audio buffer copies with Accelerate.
-- Removes steady-state render-callback allocations and redundant FFT work.
-- Flattens biquad state, uses native Float32 coefficients, and caches limiter constants.
-- Batches spectrum bars into one Canvas path.
-
-Targeted benchmarks versus 1.0.2 measured a 68% reduction in 10-band stereo DSP time, a 99% reduction in hidden spectrum-capture time, and a 93% reduction in active spectrum-capture time.
+Versions 1.0.x do not contain the updater and need one manual installation of 1.1.1. Users already on 1.1.0 can update automatically.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.1.0/OnlyEQ.app.zip" length="2328511" type="application/octet-stream" sparkle:edSignature="W3FYRGdn6KRwrXfO34jRZGY5hhMnFNlABS1TYuC8lSfOl3Ylj8/jrrALYm2Ua7dMgUGwmn7gguf/vOg8TkeBDA=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.1.1/OnlyEQ.app.zip" length="2332812" type="application/octet-stream" sparkle:edSignature="AzC/E/F5huSKPMgrOxmG/sD66+XVeQrcBFzbVFTXVuISBo7/Ufg02lk5L2+TCn0a1JMQVwzZAEw7yJXAAE49Bw=="/>
         </item>
     </channel>
 </rss>
