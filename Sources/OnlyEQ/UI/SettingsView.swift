@@ -45,12 +45,34 @@ struct GeneralSettings: View {
                 Text("Display system audio latency in the popover.")
             }
 
-            LabeledContent("Version") {
-                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")
-                    .foregroundStyle(.secondary)
+            Section {
+                LabeledContent("OnlyEQ") {
+                    Text(appVersion)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                LabeledContent("macOS") {
+                    Text(systemVersion)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("About")
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "dev"
+        guard let build = info?["CFBundleVersion"] as? String else { return version }
+        return "\(version) (\(build))"
+    }
+
+    private var systemVersion: String {
+        ProcessInfo.processInfo.operatingSystemVersionString
+            .replacingOccurrences(of: "Version ", with: "")
     }
 }
 
