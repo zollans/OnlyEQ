@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
+        popover.animates = false
         popover.delegate = self
         let hosting = NSHostingController(rootView: PopoverView().environmentObject(state))
         // PopoverView has a stable frame, so size the popover once. Continuously
