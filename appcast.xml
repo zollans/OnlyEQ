@@ -4,21 +4,22 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.3</title>
-            <pubDate>Fri, 10 Jul 2026 11:29:23 -0700</pubDate>
+            <pubDate>Fri, 10 Jul 2026 13:29:41 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>16</sparkle:version>
+            <sparkle:version>17</sparkle:version>
             <sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.3
 
 - Rebuilds the audio engine when an output device renegotiates its sample rate, keeping filters and spectrum bins correctly tuned.
 - Stops DSP processing after prolonged digital silence, clears stale filter and limiter history before sleeping, and resumes on the first non-silent buffer.
+- Fixes silence-gate wake detection for padded or strided Core Audio buffer layouts so playback cannot remain muted after resuming.
 - Memoizes automatic preamp calculations by band values and active sample rate.
 - Eliminates periodic hidden-window layout spikes from unchanged permission-watchdog publications.
 - Remembers independent working EQ state for each output device without writing on every drag frame.
 - Removes the global mouse monitor that could race status-icon clicks while preserving the rounded, arrowless panel.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.3/OnlyEQ.app.zip" length="2474272" type="application/octet-stream" sparkle:edSignature="mpu+GW6ti7Tv6cg4Q4YNdITXnAm8ba2NrHeY22A6E7CVE6VRLTy9dRXdt/WaSjhz7QNukCpKzWHmwqCmqjm3Dw=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.3/OnlyEQ.app.zip" length="2473985" type="application/octet-stream" sparkle:edSignature="qjHeGD46c2DcZntWiw09NiKqct8AWaBtr1Sk1FQT1q+h04fw2fAXtuL5hiUjonipr7nnHudX7vCZrLv8K4RaDw=="/>
         </item>
     </channel>
 </rss>

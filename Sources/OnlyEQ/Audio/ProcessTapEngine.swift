@@ -275,19 +275,18 @@ final class ProcessTapEngine {
         }
         guard !inputChannels.isEmpty, frameCount != .max, frameCount > 0 else { return }
 
-        // One peak scan of the raw input detects audio anywhere in the buffer,
-        // and a full ring-out window of exact silence means the EQ and limiter
-        // tails have decayed too — the DSP chain can idle until audio returns.
-        var inputPeak: Float = 0
-        for buffer in inputList {
-            guard let data = buffer.mData else { continue }
-            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-            guard count > 0 else { continue }
-            var peak: Float = 0
-            vDSP_maxmgv(data.assumingMemoryBound(to: Float.self), 1, &peak, vDSP_Length(count))
-            inputPeak = max(inputPeak, peak)
+        // Inspect the exact frames/channels the renderer consumes. Scanning the
+        // raw AudioBuffer storage as one contiguous vDSP vector is incorrect for
+        // layouts with padding or a channel stride and can leave the engine
+        // permanently gated after playback resumes.
+        var inputHasSignal = false
+        signalSearch: for channel in inputChannels {
+            for frame in 0..<frameCount where channel.pointer[frame * channel.stride] != 0 {
+                inputHasSignal = true
+                break signalSearch
+            }
         }
-        if inputPeak != 0 {
+        if inputHasSignal {
             hasReceivedAudio = true
             silentFrames = 0
             isSilenceGated = false
