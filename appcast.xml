@@ -4,9 +4,9 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.2</title>
-            <pubDate>Thu, 09 Jul 2026 22:10:37 -0700</pubDate>
+            <pubDate>Thu, 09 Jul 2026 22:19:11 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>13</sparkle:version>
+            <sparkle:version>14</sparkle:version>
             <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.2
@@ -17,12 +17,13 @@
 - Keeps the menu-bar icon brightly highlighted while the panel is open.
 - Matches EQ-node dragging, spectrum presentation, peak metering, and volume publication to the active display refresh rate, including 120 Hz ProMotion screens.
 - Caches size-independent EQ response data during live window resizing and recalculates only bands whose parameters changed.
-- Prevents editor intrinsic-size feedback while resizing its window.
+- Keeps editor hosting unconstrained so AppKit edge and corner resizing remains available.
 - Fixes the real status-icon click path so the arrowless panel no longer closes immediately when mouse tracking releases key focus.
 - Uses explicit outside-click, app-deactivation, and window-opening dismissal instead of fragile key-window loss.
+- Avoids `hidesOnDeactivate`, which could invisibly order out an accessory-app panel immediately after a real status click; global clicks and workspace activation now own dismissal.
 - Keeps bottom-bar labels, toggles, and buttons intact at narrow editor widths while allowing the preamp slider to shrink fluidly.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2444565" type="application/octet-stream" sparkle:edSignature="Ep3tGwYP1iuiOlDMLTW1qa9fcBZILcaPzEAX9UipyNi3QsUCkvg9MA7ZHrxTz/u/aoUHRB+zgSXkdniZpkj4Ag=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2443995" type="application/octet-stream" sparkle:edSignature="i3qRm07IgMBU5ZUW9vAAteRB7Z970nKQYGdg8oa7x3uKvLjDvB3Q7NT97bLiQSiVAPPKr8z1Zi9b55hRDDHSAQ=="/>
         </item>
     </channel>
 </rss>

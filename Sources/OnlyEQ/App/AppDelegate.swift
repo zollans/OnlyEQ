@@ -8,7 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var menuPanel: MenuPanel!
     private var localMouseMonitor: Any?
-    private var appResignObserver: NSObjectProtocol?
+    private var globalMouseMonitor: Any?
+    private var workspaceActivationObserver: NSObjectProtocol?
     private var hidePanelObserver: NSObjectProtocol?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
@@ -39,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuPanel.contentViewController = hosting
         menuPanel.level = .popUpMenu
         menuPanel.isFloatingPanel = true
-        menuPanel.hidesOnDeactivate = true
+        menuPanel.hidesOnDeactivate = false
         menuPanel.isReleasedWhenClosed = false
         menuPanel.hasShadow = true
         menuPanel.isOpaque = false
@@ -76,7 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
-        if let appResignObserver { NotificationCenter.default.removeObserver(appResignObserver) }
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
+        if let workspaceActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
+        }
         if let hidePanelObserver { NotificationCenter.default.removeObserver(hidePanelObserver) }
         AppState.shared.flushWorkingPresetPersistence()
         AppState.shared.engine.stop()
@@ -125,10 +129,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return event
         }
 
-        appResignObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification,
-            object: NSApp, queue: .main
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
+            Task { @MainActor in self?.hideMenuPanel() }
+        }
+
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication
+            guard application?.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
             Task { @MainActor in self?.hideMenuPanel() }
         }
 
@@ -282,7 +295,6 @@ final class WindowManager {
                                      initialProfileSuggestion: profileSuggestion)
                     .environmentObject(AppState.shared)
             )
-            hosting.sizingOptions = .standardBounds
             window.contentViewController = hosting
             // Restore the saved frame if there is one; otherwise center.
             if !window.setFrameUsingName("EditorWindow") { window.center() }

@@ -33,25 +33,14 @@ if editorProbe || profileSuggestionProbe {
         let state = AppState.shared
         state.engineState = .running
         state.editorIsVisible = true
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 840, height: 560),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
+        WindowManager.shared.showEditor(
+            importing: profileSuggestionProbe,
+            profileSuggestion: profileSuggestionProbe ? ProfileSuggestion(
+                deviceUID: "probe.bluetooth.headphones",
+                deviceName: "Aaron’s WH-1000XM5 Stereo",
+                searchQuery: "WH-1000XM5"
+            ) : nil
         )
-        window.title = "OnlyEQ UI Probe"
-        window.contentViewController = NSHostingController(
-            rootView: EditorView(
-                initialImportRequested: profileSuggestionProbe,
-                initialProfileSuggestion: profileSuggestionProbe ? ProfileSuggestion(
-                    deviceUID: "probe.bluetooth.headphones",
-                    deviceName: "Aaron’s WH-1000XM5 Stereo",
-                    searchQuery: "WH-1000XM5"
-                ) : nil
-            ).environmentObject(state)
-        )
-        window.center()
-        window.makeKeyAndOrderFront(nil)
         app.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { app.terminate(nil) }
         app.run()
