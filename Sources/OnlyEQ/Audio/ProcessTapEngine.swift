@@ -35,6 +35,7 @@ final class ProcessTapEngine {
     private var tapID: AudioObjectID = 0
     private var aggregateID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
+    private var sampleRateListener: AudioObjectPropertyListenerBlock?
     private var channelScratch: [UnsafeMutablePointer<Float>] = []
     private struct InputChannel {
         var pointer: UnsafeMutablePointer<Float>
@@ -44,6 +45,11 @@ final class ProcessTapEngine {
     private var activeChannels: [UnsafeMutablePointer<Float>] = []
 
     var onStateChange: ((State) -> Void)?
+
+    /// Fired (on the main queue) when the tapped device's nominal sample rate
+    /// changes while running. Biquad coefficients are baked for one rate, so
+    /// the owner must restart the engine to stay on pitch.
+    var onSampleRateChange: (() -> Void)?
 
     init() {
         inputChannels.reserveCapacity(8)
@@ -147,10 +153,12 @@ final class ProcessTapEngine {
             return
         }
 
+        installSampleRateListener(on: deviceID)
         transition(to: .running)
     }
 
     func stop() {
+        removeSampleRateListener()
         if let ioProcID, aggregateID != 0 {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
@@ -185,6 +193,30 @@ final class ProcessTapEngine {
         Log.write("engine: \(newState)")
         let callback = onStateChange
         DispatchQueue.main.async { callback?(newState) }
+    }
+
+    private static let sampleRateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+
+    private func installSampleRateListener(on deviceID: AudioObjectID) {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self,
+                  AudioDeviceManager.nominalSampleRate(deviceID) != self.processor.sampleRate else { return }
+            self.onSampleRateChange?()
+        }
+        var addr = Self.sampleRateAddress
+        if AudioObjectAddPropertyListenerBlock(deviceID, &addr, .main, block) == noErr {
+            sampleRateListener = block
+        }
+    }
+
+    private func removeSampleRateListener() {
+        guard let sampleRateListener, targetDeviceID != 0 else { return }
+        var addr = Self.sampleRateAddress
+        AudioObjectRemovePropertyListenerBlock(targetDeviceID, &addr, .main, sampleRateListener)
+        self.sampleRateListener = nil
     }
 
     private func readIOBufferSize() {

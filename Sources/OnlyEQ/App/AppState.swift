@@ -116,6 +116,12 @@ final class AppState: ObservableObject {
         engine.onStateChange = { [weak self] state in
             Task { @MainActor in self?.engineState = state }
         }
+        // A nominal sample-rate change (Bluetooth codec renegotiation, Audio
+        // MIDI Setup) invalidates the biquad coefficients; rebuild everything
+        // at the new rate.
+        engine.onSampleRateChange = { [weak self] in
+            Task { @MainActor in self?.rebuildEngine() }
+        }
         rebuildEngine()
         startSilenceWatchdog()
     }
