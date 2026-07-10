@@ -16,6 +16,7 @@ final class AppState: ObservableObject {
     let engine = ProcessTapEngine()
     let store = PresetStore()
     let onlineDB = OnlineDatabase()
+    private let hardwareVolumeWriter = HardwareVolumeWriter()
 
     /// Installed by the app delegate so device detection can request UI without
     /// coupling the audio/state layer to a particular window implementation.
@@ -98,6 +99,8 @@ final class AppState: ObservableObject {
     private var silenceCheckTimer: Timer?
     private var pendingPresetPersistence: DispatchWorkItem?
     private var suggestedDeviceUIDs = Set(UserDefaults.standard.stringArray(forKey: "profileSuggestion.seenDeviceUIDs") ?? [])
+    private var currentDeviceHasHardwareVolume = false
+    private var lastPushedSoftwareGainDB = Double.nan
 
     /// Sticky per-session flag: once the tap has delivered audio we know the
     /// permission is granted, so engine restarts (device switches, settings
@@ -133,14 +136,16 @@ final class AppState: ObservableObject {
     }
 
     private func pushToProcessor() {
+        let outputGainDB = softwareGainDB
         engine.processor.update(
             bands: preset.bands,
             preampDB: effectivePreampDB,
-            outputGainDB: softwareGainDB,
+            outputGainDB: outputGainDB,
             limiterEnabled: limiterEnabled,
             limiterCeilingDB: limiterCeilingDB,
             bypassed: bypassed || !isEnabled
         )
+        lastPushedSoftwareGainDB = outputGainDB
     }
 
     /// Keep visualization work off the realtime thread unless a consumer is
@@ -296,20 +301,31 @@ final class AppState: ObservableObject {
     }
 
     private var hasHardwareVolume: Bool {
-        guard let device = currentDevice else { return false }
-        return AudioDeviceManager.hardwareVolume(device.id) != nil
+        currentDeviceHasHardwareVolume
     }
 
     private func applyVolume() {
         guard !Self.screenshotMode, let device = currentDevice else { return }
         if hasHardwareVolume {
-            AudioDeviceManager.setHardwareVolume(device.id, Float(min(volumePercent, 100) / 100))
+            hardwareVolumeWriter.submit(deviceID: device.id,
+                                        volume: Float(min(volumePercent, 100) / 100))
         }
-        pushToProcessor()
+        let outputGainDB = softwareGainDB
+        if !outputGainDB.isApproximatelyEqual(to: lastPushedSoftwareGainDB) {
+            pushToProcessor()
+        }
     }
 
     private func syncVolumeFromDevice() {
-        guard let device = currentDevice, let hw = AudioDeviceManager.hardwareVolume(device.id) else { return }
+        guard let device = currentDevice else {
+            currentDeviceHasHardwareVolume = false
+            return
+        }
+        guard let hw = AudioDeviceManager.hardwareVolume(device.id) else {
+            currentDeviceHasHardwareVolume = false
+            return
+        }
+        currentDeviceHasHardwareVolume = true
         // Only reflect hardware volume when we're not boosting.
         if volumePercent <= 100 {
             let percent = Double(hw) * 100
@@ -349,5 +365,11 @@ final class AppState: ObservableObject {
            let saved = try? JSONDecoder().decode(EQPreset.self, from: data) {
             preset = saved
         }
+    }
+}
+
+private extension Double {
+    func isApproximatelyEqual(to other: Double) -> Bool {
+        isFinite && other.isFinite && abs(self - other) < 0.000_001
     }
 }

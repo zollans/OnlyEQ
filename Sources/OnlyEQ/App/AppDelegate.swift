@@ -73,8 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             popover.performClose(nil)
         } else {
             AppState.shared.refreshDevices()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
         }
     }
 
@@ -219,8 +220,7 @@ final class WindowManager {
             }
             editorWindow = window
         }
-        editorWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let editorWindow { focus(editorWindow) }
         if importing, !isCreatingWindow {
             EditorView.importRequested.send(profileSuggestion)
         }
@@ -241,8 +241,7 @@ final class WindowManager {
             window.center()
             settingsWindow = window
         }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let settingsWindow { focus(settingsWindow) }
     }
 
     func showOnboarding() {
@@ -260,11 +259,25 @@ final class WindowManager {
             window.center()
             onboardingWindow = window
         }
-        onboardingWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let onboardingWindow { focus(onboardingWindow) }
     }
 
     func closeOnboarding() {
         onboardingWindow?.close()
+    }
+
+    /// Accessory/menu-bar apps must activate before asking a window to become
+    /// key. Retry on the next run-loop turn because a closing transient popover
+    /// can otherwise return focus to the previous application.
+    private func focus(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak window] in
+            guard let window, window.isVisible else { return }
+            if !NSApp.isActive || !window.isKeyWindow {
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 }

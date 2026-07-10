@@ -272,23 +272,26 @@ struct PopoverView: View {
 struct BoostSlider: View {
     @Binding var value: Double
     var maxPercent: Double
+    @State private var trackedValue: Double?
+    @State private var lastPublishedTime: TimeInterval = 0
 
     var body: some View {
+        let displayedValue = trackedValue ?? value
         VStack(spacing: 3) {
             HStack(spacing: 8) {
-                Image(systemName: value == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                Image(systemName: displayedValue == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
                 GeometryReader { geo in
                     let width = geo.size.width
-                    let fraction = min(max(value / maxPercent, 0), 1)
+                    let fraction = min(max(displayedValue / maxPercent, 0), 1)
                     let hundred = min(100 / maxPercent, 1)
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.12)).frame(height: 5)
                         Capsule().fill(Color.accentColor)
                             .frame(width: min(fraction, hundred) * width, height: 5)
-                        if value > 100 {
+                        if displayedValue > 100 {
                             Rectangle().fill(.orange)
                                 .frame(width: (fraction - hundred) * width, height: 5)
                                 .offset(x: hundred * width)
@@ -308,9 +311,22 @@ struct BoostSlider: View {
                     }
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 0).onChanged { g in
-                        value = min(max(Double((g.location.x - 7.5) / (width - 15)) * maxPercent, 0), maxPercent)
-                    })
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { gesture in
+                            let updated = sliderValue(at: gesture.location.x, width: width)
+                            trackedValue = updated
+                            let now = ProcessInfo.processInfo.systemUptime
+                            if lastPublishedTime == 0 || now - lastPublishedTime >= 1.0 / 60.0 {
+                                value = updated
+                                lastPublishedTime = now
+                            }
+                        }
+                        .onEnded { gesture in
+                            let updated = sliderValue(at: gesture.location.x, width: width)
+                            value = updated
+                            trackedValue = nil
+                            lastPublishedTime = 0
+                        })
                 }
                 .frame(height: 18)
             }
@@ -328,6 +344,11 @@ struct BoostSlider: View {
             .frame(height: 11)
             .padding(.leading, 24)
         }
+    }
+
+    private func sliderValue(at x: CGFloat, width: CGFloat) -> Double {
+        guard width > 15 else { return value }
+        return min(max(Double((x - 7.5) / (width - 15)) * maxPercent, 0), maxPercent)
     }
 }
 

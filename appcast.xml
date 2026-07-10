@@ -3,23 +3,22 @@
     <channel>
         <title>OnlyEQ</title>
         <item>
-            <title>1.2.0</title>
-            <pubDate>Thu, 09 Jul 2026 14:41:08 -0700</pubDate>
+            <title>1.2.1</title>
+            <pubDate>Thu, 09 Jul 2026 18:43:50 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.0
+            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.1
 
-- Detects newly active Bluetooth and Bluetooth LE headphones that do not have a device profile.
-- Opens Browse Online automatically with the cleaned device model already searched.
-- Selects and fetches the strongest peqdb match for review, falling back to AutoEq when necessary.
-- Shows the detected device, preset curve, filter count, source, and alternatives before anything is applied.
-- Saves a confirmed preset and remembers it against the stable Core Audio device UID for future connections.
-- Suggests a profile only once per unrecognized device and includes a Settings toggle to disable suggestions.
-- Performs matching only when the output device changes, adding no ongoing audio or visualization CPU work.
+- Makes the boost-volume thumb track pointer movement locally at full input rate while publishing state at the display rate.
+- Moves potentially blocking Core Audio hardware-volume writes off the main thread.
+- Coalesces pending Bluetooth volume changes so slow hardware never builds a backlog of stale values.
+- Avoids rebuilding the audio DSP snapshot for ordinary hardware-volume changes below 100%.
+- Activates the menu-bar app before presenting its popover, editor, settings, or onboarding windows.
+- Reasserts key-window focus after a transient popover closes, preventing inactive white/washed-out window styling until the first click.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.0/OnlyEQ.app.zip" length="2410001" type="application/octet-stream" sparkle:edSignature="yojmO4gzXjjSF0R5+G+R9vpSrd0d+yv7PZUN59gOKQUgvpnfVSKzrPOa3h1ztDZZ4Mr4JmjPP6MWBnnSJlYpAg=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.1/OnlyEQ.app.zip" length="2416446" type="application/octet-stream" sparkle:edSignature="ZR/84gn8RhL0UcaMJz4992+BpXI6+G1NuR1JQLLlfZF0mIkUnRhXFS1ct1YxaeB7CtzFULSj9PArUn1jHr+iCA=="/>
         </item>
     </channel>
 </rss>
