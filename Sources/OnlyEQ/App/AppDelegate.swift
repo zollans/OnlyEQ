@@ -7,6 +7,9 @@ import Sparkle
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var menuPanel: MenuPanel!
+    private var localMouseMonitor: Any?
+    private var appResignObserver: NSObjectProtocol?
+    private var hidePanelObserver: NSObjectProtocol?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -34,7 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             styleMask: [.borderless], backing: .buffered, defer: false
         )
         menuPanel.contentViewController = hosting
-        menuPanel.delegate = self
         menuPanel.level = .popUpMenu
         menuPanel.isFloatingPanel = true
         menuPanel.hidesOnDeactivate = true
@@ -57,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         Log.write("app: status item ready (visible: \(statusItem.isVisible))")
+        installPanelDismissalObservers()
 
         if CommandLine.arguments.contains("--menu-panel-probe") {
             DispatchQueue.main.async { [weak self] in self?.togglePopover() }
@@ -72,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let appResignObserver { NotificationCenter.default.removeObserver(appResignObserver) }
+        if let hidePanelObserver { NotificationCenter.default.removeObserver(hidePanelObserver) }
         AppState.shared.flushWorkingPresetPersistence()
         AppState.shared.engine.stop()
     }
@@ -103,6 +109,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 button?.highlight(true)
             }
             AppState.shared.popoverIsVisible = true
+            Log.write("menu-panel: shown")
+        }
+    }
+
+    private func installPanelDismissalObservers() {
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            guard let self, self.menuPanel.isVisible else { return event }
+            let statusWindow = self.statusItem.button?.window
+            if event.window !== self.menuPanel, event.window !== statusWindow {
+                DispatchQueue.main.async { [weak self] in self?.hideMenuPanel() }
+            }
+            return event
+        }
+
+        appResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: NSApp, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.hideMenuPanel() }
+        }
+
+        hidePanelObserver = NotificationCenter.default.addObserver(
+            forName: .onlyEQHideMenuPanel,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.hideMenuPanel() }
         }
     }
 
@@ -119,9 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func hideMenuPanel() {
+        let wasVisible = menuPanel.isVisible
         statusItem.button?.highlight(false)
-        if menuPanel.isVisible { menuPanel.orderOut(nil) }
+        if wasVisible { menuPanel.orderOut(nil) }
         AppState.shared.popoverIsVisible = false
+        if wasVisible { Log.write("menu-panel: hidden") }
     }
 
     private func showContextMenu() {
@@ -210,14 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func checkForUpdates() { updaterController.checkForUpdates(nil) }
 }
 
-extension AppDelegate: NSWindowDelegate {
-    func windowDidResignKey(_ notification: Notification) {
-        guard notification.object as? NSWindow === menuPanel else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.menuPanel.isKeyWindow else { return }
-            self.hideMenuPanel()
-        }
-    }
+private extension Notification.Name {
+    static let onlyEQHideMenuPanel = Notification.Name("OnlyEQ.HideMenuPanel")
 }
 
 /// Borderless AppKit windows do not normally become key. This tiny subclass
@@ -321,6 +351,7 @@ final class WindowManager {
     /// key. Retry on the next run-loop turn because a closing transient popover
     /// can otherwise return focus to the previous application.
     private func focus(_ window: NSWindow) {
+        NotificationCenter.default.post(name: .onlyEQHideMenuPanel, object: nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async { [weak window] in

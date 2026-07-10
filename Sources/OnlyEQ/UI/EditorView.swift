@@ -203,26 +203,40 @@ struct EditorView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Text("Preamp").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("Preamp")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
             Text(String(format: "%.1f dB", state.effectivePreampDB))
                 .font(.system(size: 11, weight: .medium).monospacedDigit())
                 .frame(width: 52, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
             Slider(value: Binding(
                 get: { state.preset.preampDB },
                 set: { state.preset.preampDB = ($0 * 10).rounded() / 10 }
             ), in: -20...0)
-                .frame(width: 160)
+                .frame(minWidth: 72, idealWidth: 150, maxWidth: 160)
                 .disabled(state.autoPreampEnabled)
             Toggle("Auto", isOn: $state.autoPreampEnabled)
                 .toggleStyle(.checkbox)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
             clipIndicator
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             Spacer()
             Toggle("Limiter", isOn: $state.limiterEnabled)
                 .toggleStyle(AccentSwitchStyle(width: 30))
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
             Button("Reset") {
                 state.applyFlat()
                 selectedBandID = nil
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(2)
         }
         .controlSize(.small)
         .padding(.horizontal, 24)
