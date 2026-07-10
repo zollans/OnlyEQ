@@ -4,9 +4,9 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.2</title>
-            <pubDate>Thu, 09 Jul 2026 22:19:11 -0700</pubDate>
+            <pubDate>Fri, 10 Jul 2026 11:23:54 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>14</sparkle:version>
+            <sparkle:version>15</sparkle:version>
             <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.2
@@ -20,10 +20,15 @@
 - Keeps editor hosting unconstrained so AppKit edge and corner resizing remains available.
 - Fixes the real status-icon click path so the arrowless panel no longer closes immediately when mouse tracking releases key focus.
 - Uses explicit outside-click, app-deactivation, and window-opening dismissal instead of fragile key-window loss.
-- Avoids `hidesOnDeactivate`, which could invisibly order out an accessory-app panel immediately after a real status click; global clicks and workspace activation now own dismissal.
+- Avoids `hidesOnDeactivate` and the race-prone global mouse monitor; local window events and workspace activation now own dismissal.
 - Keeps bottom-bar labels, toggles, and buttons intact at narrow editor widths while allowing the preamp slider to shrink fluidly.
+- Rebuilds the audio engine when an output device renegotiates its sample rate, keeping filters and spectrum bins correctly tuned.
+- Stops DSP processing after prolonged digital silence, clears stale filter and limiter history before sleeping, and resumes on the first non-silent buffer.
+- Memoizes automatic preamp calculations by band values and active sample rate.
+- Eliminates periodic hidden-window layout spikes from unchanged permission-watchdog publications.
+- Remembers independent working EQ state for each output device without writing on every drag frame.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2443995" type="application/octet-stream" sparkle:edSignature="i3qRm07IgMBU5ZUW9vAAteRB7Z970nKQYGdg8oa7x3uKvLjDvB3Q7NT97bLiQSiVAPPKr8z1Zi9b55hRDDHSAQ=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2474268" type="application/octet-stream" sparkle:edSignature="Y765laLqS5SWRj/rIlgvwLNtSZYPsphjhJFtrhNLXzl2Y4nBmxDG+JD9GEZ4tcA2+02d38zxCHfMijBwkkzuCw=="/>
         </item>
     </channel>
 </rss>
