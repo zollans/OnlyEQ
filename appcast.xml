@@ -4,17 +4,18 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.2</title>
-            <pubDate>Thu, 09 Jul 2026 18:46:41 -0700</pubDate>
+            <pubDate>Thu, 09 Jul 2026 18:53:20 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>9</sparkle:version>
+            <sparkle:version>10</sparkle:version>
             <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.2
 
 - Removes the menu-bar popover opening and closing animation.
+- Replaces the pointed popover shell with a rounded, arrowless menu panel.
 - Makes the OnlyEQ panel appear immediately and accept input as soon as the menu-bar icon is clicked.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2416619" type="application/octet-stream" sparkle:edSignature="/KE0na1hEcYxEx/ih8PAD2m43C5HIqsXEzBywYtZXnDzRrVvWaOQgAMSt8Nnp4qgHlo5LSzoZ1djqgZB5jX7Cw=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2424654" type="application/octet-stream" sparkle:edSignature="rzzLrivbOOmq8agY/F4TbJE5Je9eXKAMhZtDnmbOhBNpmdPL0gv0Kax02ZxiQ3fMNjnl0YI1DNvr+x4YijawDA=="/>
         </item>
     </channel>
 </rss>

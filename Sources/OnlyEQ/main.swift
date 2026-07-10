@@ -88,6 +88,9 @@ if CommandLine.arguments.contains("--engine-probe") {
 }
 
 MainActor.assumeIsolated {
+    if CommandLine.arguments.contains("--menu-panel-probe") {
+        AppState.screenshotMode = true
+    }
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate

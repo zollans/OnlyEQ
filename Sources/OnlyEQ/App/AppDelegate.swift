@@ -6,7 +6,7 @@ import Sparkle
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var menuPanel: MenuPanel!
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -23,18 +23,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         Log.write("app: state ready")
 
-        popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = false
-        popover.delegate = self
-        let hosting = NSHostingController(rootView: PopoverView().environmentObject(state))
-        // PopoverView has a stable frame, so size the popover once. Continuously
-        // publishing preferredContentSize makes every spectrum tick remeasure
-        // and lay out the entire popover instead of redrawing just its Canvas.
+        let hosting = NSHostingController(
+            rootView: PopoverView()
+                .environmentObject(state)
+                .background(Color(nsColor: .windowBackgroundColor))
+        )
         hosting.sizingOptions = .standardBounds
-        popover.contentViewController = hosting
-        popover.contentSize = hosting.view.fittingSize
-        Log.write("app: popover ready")
+        menuPanel = MenuPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 410),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        menuPanel.contentViewController = hosting
+        menuPanel.delegate = self
+        menuPanel.level = .popUpMenu
+        menuPanel.isFloatingPanel = true
+        menuPanel.hidesOnDeactivate = true
+        menuPanel.isReleasedWhenClosed = false
+        menuPanel.hasShadow = true
+        menuPanel.isOpaque = false
+        menuPanel.backgroundColor = .clear
+        menuPanel.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.cornerRadius = 12
+        hosting.view.layer?.cornerCurve = .continuous
+        hosting.view.layer?.masksToBounds = true
+        Log.write("app: menu panel ready")
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
@@ -44,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         Log.write("app: status item ready (visible: \(statusItem.isVisible))")
+
+        if CommandLine.arguments.contains("--menu-panel-probe") {
+            DispatchQueue.main.async { [weak self] in self?.togglePopover() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { NSApp.terminate(nil) }
+        }
 
         HotKeyManager.shared.install()
 
@@ -70,17 +88,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func togglePopover() {
         guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
+        if menuPanel.isVisible {
+            hideMenuPanel()
         } else {
             AppState.shared.refreshDevices()
+            positionMenuPanel(below: button)
             NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            menuPanel.makeKeyAndOrderFront(nil)
+            AppState.shared.popoverIsVisible = true
         }
     }
 
+    private func positionMenuPanel(below button: NSStatusBarButton) {
+        guard let buttonWindow = button.window else { return }
+        let buttonInWindow = button.convert(button.bounds, to: nil)
+        let buttonOnScreen = buttonWindow.convertToScreen(buttonInWindow)
+        let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let panelSize = menuPanel.frame.size
+        let x = min(max(buttonOnScreen.midX - panelSize.width / 2, screenFrame.minX + 6),
+                    screenFrame.maxX - panelSize.width - 6)
+        let y = buttonOnScreen.minY - panelSize.height - 4
+        menuPanel.setFrameOrigin(NSPoint(x: x, y: max(y, screenFrame.minY + 6)))
+    }
+
+    private func hideMenuPanel() {
+        guard menuPanel.isVisible else { return }
+        menuPanel.orderOut(nil)
+        AppState.shared.popoverIsVisible = false
+    }
+
     private func showContextMenu() {
+        hideMenuPanel()
         let state = AppState.shared
         let menu = NSMenu()
 
@@ -165,18 +203,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func checkForUpdates() { updaterController.checkForUpdates(nil) }
 }
 
-// Closing the popover only orders its window out — the hosting controller
-// (and the SwiftUI tree inside) stays alive, so PopoverView gates its
-// spectrum animation on this visibility flag to stop it from refreshing
-// forever after the first show.
-extension AppDelegate: NSPopoverDelegate {
-    func popoverDidShow(_ notification: Notification) {
-        AppState.shared.popoverIsVisible = true
+extension AppDelegate: NSWindowDelegate {
+    func windowDidResignKey(_ notification: Notification) {
+        guard notification.object as? NSWindow === menuPanel else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.menuPanel.isKeyWindow else { return }
+            self.hideMenuPanel()
+        }
     }
+}
 
-    func popoverDidClose(_ notification: Notification) {
-        AppState.shared.popoverIsVisible = false
-    }
+/// Borderless AppKit windows do not normally become key. This tiny subclass
+/// gives the arrowless menu panel normal control focus and active appearance.
+private final class MenuPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 /// Owns the editor, settings, and onboarding windows.

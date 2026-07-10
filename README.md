@@ -60,6 +60,7 @@ swift run OnlyEQ --test               # self-test suite (importer + DSP)
 swift run OnlyEQ --engine-probe       # headless engine check, prints JSON
 swift run OnlyEQ --editor-probe       # 15-second editor UI profiling run
 swift run OnlyEQ --profile-suggestion-probe # previews Bluetooth profile discovery
+swift run OnlyEQ --menu-panel-probe    # previews the arrowless menu panel
 swift run OnlyEQ --screenshots out/   # renders the README screenshots
 ./scripts/build-app.sh release        # universal binary release build
 ./scripts/prepare-release.sh 1.2.2    # signed archive + appcast
