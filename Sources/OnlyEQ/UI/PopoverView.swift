@@ -274,6 +274,7 @@ struct BoostSlider: View {
     var maxPercent: Double
     @State private var trackedValue: Double?
     @State private var lastPublishedTime: TimeInterval = 0
+    @State private var publicationInterval: TimeInterval = 1.0 / 60.0
 
     var body: some View {
         let displayedValue = trackedValue ?? value
@@ -316,7 +317,10 @@ struct BoostSlider: View {
                             let updated = sliderValue(at: gesture.location.x, width: width)
                             trackedValue = updated
                             let now = ProcessInfo.processInfo.systemUptime
-                            if lastPublishedTime == 0 || now - lastPublishedTime >= 1.0 / 60.0 {
+                            if lastPublishedTime == 0 {
+                                publicationInterval = DisplayRefreshRate.interval()
+                            }
+                            if lastPublishedTime == 0 || now - lastPublishedTime >= publicationInterval {
                                 value = updated
                                 lastPublishedTime = now
                             }

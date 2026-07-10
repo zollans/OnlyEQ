@@ -247,11 +247,13 @@ final class WindowManager {
             window.title = "OnlyEQ"
             window.minSize = NSSize(width: 720, height: 480)
             window.isReleasedWhenClosed = false
-            window.contentViewController = NSHostingController(
+            let hosting = NSHostingController(
                 rootView: EditorView(initialImportRequested: importing,
                                      initialProfileSuggestion: profileSuggestion)
                     .environmentObject(AppState.shared)
             )
+            hosting.sizingOptions = .standardBounds
+            window.contentViewController = hosting
             // Restore the saved frame if there is one; otherwise center.
             if !window.setFrameUsingName("EditorWindow") { window.center() }
             window.setFrameAutosaveName("EditorWindow")

@@ -358,7 +358,7 @@ private final class PeakMeterNSView: NSView {
     private func startAnimating() {
         guard animationLink == nil else { return }
         let link = displayLink(target: self, selector: #selector(samplePeak(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        DisplayRefreshRate.configure(link, for: window)
         link.add(to: .main, forMode: .common)
         animationLink = link
         samplePeak(link)

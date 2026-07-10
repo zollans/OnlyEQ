@@ -4,9 +4,9 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.2</title>
-            <pubDate>Thu, 09 Jul 2026 18:57:40 -0700</pubDate>
+            <pubDate>Thu, 09 Jul 2026 21:56:20 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>11</sparkle:version>
+            <sparkle:version>12</sparkle:version>
             <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.2
@@ -15,8 +15,11 @@
 - Replaces the pointed popover shell with a rounded, arrowless menu panel.
 - Makes the OnlyEQ panel appear immediately and accept input as soon as the menu-bar icon is clicked.
 - Keeps the menu-bar icon brightly highlighted while the panel is open.
+- Matches EQ-node dragging, spectrum presentation, peak metering, and volume publication to the active display refresh rate, including 120 Hz ProMotion screens.
+- Caches size-independent EQ response data during live window resizing and recalculates only bands whose parameters changed.
+- Prevents editor intrinsic-size feedback while resizing its window.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2425878" type="application/octet-stream" sparkle:edSignature="hjvWngeWdI4XZ1it3UE0UITWjsUQpvtiwJhY/NfiYx5E/FIBQBQRMg40bTLLPxxvUq4pgrFmZDbGnvIsigGAAQ=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2434817" type="application/octet-stream" sparkle:edSignature="AheUiwyr9v2tX9jx7HszUHSKp2KGBBQKBt79h86Qf00ZZS+OlY4lYlfh1tTsXgjuJklB69+2xs0vG7e8oftiCw=="/>
         </item>
     </channel>
 </rss>

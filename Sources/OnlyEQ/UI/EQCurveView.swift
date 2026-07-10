@@ -7,6 +7,63 @@ enum BandPalette {
     static func color(_ index: Int) -> Color { colors[index % colors.count] }
 }
 
+/// Frequency responses depend on filter parameters, not view dimensions. Keep
+/// them stable across live-resize frames and recompute only bands that changed.
+@MainActor
+private final class EQCurveResponseCache: ObservableObject {
+    struct Data {
+        var combinedFrequencies: [Double]
+        var combinedResponse: [Double]
+        var individualFrequencies: [Double]
+        var individualResponses: [(index: Int, response: [Double])]
+    }
+
+    private static let combinedFrequencies = EQResponse.logGrid(count: 128)
+    private static let individualFrequencies = EQResponse.logGrid(count: 96)
+    private var cachedBands: [EQBand] = []
+    private var cachedPreampDB = Double.nan
+    private var cachedCombined: [Double] = []
+    private var individualBands: [EQBand] = []
+    private var individualResponses: [[Double]] = []
+
+    func data(bands: [EQBand], preampDB: Double, includeIndividuals: Bool) -> Data {
+        if bands != cachedBands || preampDB != cachedPreampDB {
+            cachedBands = bands
+            cachedPreampDB = preampDB
+            cachedCombined = EQResponse.curve(
+                bands: bands, preampDB: preampDB, frequencies: Self.combinedFrequencies
+            )
+        }
+
+        var enabledResponses: [(index: Int, response: [Double])] = []
+        if includeIndividuals {
+            if individualBands.count != bands.count {
+                individualBands = bands
+                individualResponses = bands.map {
+                    EQResponse.curve(bands: [$0], preampDB: 0, frequencies: Self.individualFrequencies)
+                }
+            } else {
+                for index in bands.indices where bands[index] != individualBands[index] {
+                    individualBands[index] = bands[index]
+                    individualResponses[index] = EQResponse.curve(
+                        bands: [bands[index]], preampDB: 0, frequencies: Self.individualFrequencies
+                    )
+                }
+            }
+            enabledResponses = bands.indices.compactMap { index in
+                bands[index].isEnabled ? (index, individualResponses[index]) : nil
+            }
+        }
+
+        return Data(
+            combinedFrequencies: Self.combinedFrequencies,
+            combinedResponse: cachedCombined,
+            individualFrequencies: Self.individualFrequencies,
+            individualResponses: enabledResponses
+        )
+    }
+}
+
 /// The hero EQ curve: log-frequency response with optional live spectrum bars
 /// behind it and optional draggable band nodes (editor mode).
 struct EQCurveView: View {
@@ -28,6 +85,7 @@ struct EQCurveView: View {
     var onBandChange: ((UUID, _ frequency: Double, _ gain: Double) -> Void)?
     var onBandDragEnded: (() -> Void)?
     var onAddBand: ((_ frequency: Double, _ gain: Double) -> Void)?
+    @StateObject private var responseCache = EQCurveResponseCache()
 
     private let minF = 20.0, maxF = 20000.0
 
@@ -52,12 +110,15 @@ struct EQCurveView: View {
     }
 
     var body: some View {
+        let responseData = responseCache.data(
+            bands: bands, preampDB: preampDB, includeIndividuals: showIndividualCurves
+        )
         GeometryReader { geo in
             let size = geo.size
             ZStack {
                 gridLayer(size: size)
                 if showSpectrum { SpectrumBarsView(style: spectrumStyle) }
-                curveLayer(size: size)
+                curveLayer(size: size, data: responseData)
                 if interactive { nodeLayer(size: size) }
             }
             .contentShape(Rectangle())
@@ -104,30 +165,31 @@ struct EQCurveView: View {
         }
     }
 
-    private func curvePoints(size: CGSize) -> [CGPoint] {
-        let freqs = EQResponse.logGrid(count: 128)
-        let response = EQResponse.curve(bands: bands, preampDB: preampDB, frequencies: freqs)
-        return zip(freqs, response).map { CGPoint(x: x(forFrequency: $0, size), y: y(forDB: min(max($1, -rangeDB), rangeDB), size)) }
+    private func curvePoints(size: CGSize, data: EQCurveResponseCache.Data) -> [CGPoint] {
+        zip(data.combinedFrequencies, data.combinedResponse).map {
+            CGPoint(x: x(forFrequency: $0, size),
+                    y: y(forDB: min(max($1, -rangeDB), rangeDB), size))
+        }
     }
 
     @ViewBuilder
-    private func curveLayer(size: CGSize) -> some View {
+    private func curveLayer(size: CGSize, data: EQCurveResponseCache.Data) -> some View {
         Canvas { ctx, _ in
             // Individual band curves (editor only).
             if showIndividualCurves {
-                let freqs = EQResponse.logGrid(count: 96)
-                for (i, band) in bands.enumerated() where band.isEnabled {
-                    let response = EQResponse.curve(bands: [band], preampDB: 0, frequencies: freqs)
+                for item in data.individualResponses {
                     var path = Path()
-                    for (j, f) in freqs.enumerated() {
-                        let p = CGPoint(x: x(forFrequency: f, size), y: y(forDB: min(max(response[j], -rangeDB), rangeDB), size))
+                    for (j, f) in data.individualFrequencies.enumerated() {
+                        let p = CGPoint(x: x(forFrequency: f, size),
+                                        y: y(forDB: min(max(item.response[j], -rangeDB), rangeDB), size))
                         if j == 0 { path.move(to: p) } else { path.addLine(to: p) }
                     }
-                    ctx.stroke(path, with: .color(BandPalette.color(i).opacity(0.22)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    ctx.stroke(path, with: .color(BandPalette.color(item.index).opacity(0.22)),
+                               style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 }
             }
 
-            let points = curvePoints(size: size)
+            let points = curvePoints(size: size, data: data)
             guard points.count > 1 else { return }
 
             var fill = Path()
@@ -252,7 +314,7 @@ private final class SpectrumBarsNSView: NSView {
         lastAnalysisTime = 0
 
         let link = displayLink(target: self, selector: #selector(displayLinkDidFire(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        DisplayRefreshRate.configure(link, for: window)
         link.add(to: .main, forMode: .common)
         animationLink = link
         renderBars(displayedBars)
@@ -267,7 +329,7 @@ private final class SpectrumBarsNSView: NSView {
 
     @objc private func displayLinkDidFire(_ link: CADisplayLink) {
         // FFT/magnitude work stays capped at 30 Hz. The layer interpolates the
-        // latest targets at 60 fps, so motion is smooth without doubling DSP.
+        // latest targets at the screen refresh rate without multiplying DSP.
         if lastAnalysisTime == 0 || link.timestamp - lastAnalysisTime >= 1.0 / 30.0 {
             let bars = spectrum.bars()
             if bars.count == targetBars.count {
@@ -330,6 +392,7 @@ private struct DraggableBandNode: View {
 
     @State private var dragPosition: CGPoint?
     @State private var lastModelUpdate: CFTimeInterval = 0
+    @State private var modelUpdateInterval: TimeInterval = 1.0 / 60.0
 
     private let minF = 20.0, maxF = 20000.0
 
@@ -350,7 +413,10 @@ private struct DraggableBandNode: View {
                     dragPosition = update.position
 
                     let now = CACurrentMediaTime()
-                    if lastModelUpdate == 0 || now - lastModelUpdate >= 1.0 / 60.0 {
+                    if lastModelUpdate == 0 {
+                        modelUpdateInterval = DisplayRefreshRate.interval()
+                    }
+                    if lastModelUpdate == 0 || now - lastModelUpdate >= modelUpdateInterval {
                         onChange?(band.id, update.frequency, update.gain)
                         lastModelUpdate = now
                     }
