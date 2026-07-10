@@ -43,6 +43,8 @@ final class ProcessTapEngine {
     }
     private var inputChannels: [InputChannel] = []
     private var activeChannels: [UnsafeMutablePointer<Float>] = []
+    /// Consecutive all-zero input frames, saturated at one second's worth.
+    private var silentFrames = 0
 
     var onStateChange: ((State) -> Void)?
 
@@ -132,6 +134,7 @@ final class ProcessTapEngine {
 
         // 3. IOProc: tapped audio arrives as input, processed audio leaves as output.
         hasReceivedAudio = false
+        silentFrames = 0
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) { [weak self] _, inInputData, _, outOutputData, _ in
             self?.render(input: inInputData, output: outOutputData)
         }
@@ -244,7 +247,7 @@ final class ProcessTapEngine {
 
     // MARK: - Render path (audio thread)
 
-    private func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
+    func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
         let inputList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outputList = UnsafeMutableAudioBufferListPointer(output)
         guard inputList.count > 0, outputList.count > 0 else { return }
@@ -265,12 +268,31 @@ final class ProcessTapEngine {
         }
         guard !inputChannels.isEmpty, frameCount != .max, frameCount > 0 else { return }
 
-        if !hasReceivedAudio {
-            outer: for channel in inputChannels {
-                for i in 0..<min(frameCount, 64) where channel.pointer[i * channel.stride] != 0 {
-                    hasReceivedAudio = true
-                    break outer
+        // One peak scan of the raw input detects audio anywhere in the buffer,
+        // and a full ring-out window of exact silence means the EQ and limiter
+        // tails have decayed too — the DSP chain can idle until audio returns.
+        var inputPeak: Float = 0
+        for buffer in inputList {
+            guard let data = buffer.mData else { continue }
+            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+            guard count > 0 else { continue }
+            var peak: Float = 0
+            vDSP_maxmgv(data.assumingMemoryBound(to: Float.self), 1, &peak, vDSP_Length(count))
+            inputPeak = max(inputPeak, peak)
+        }
+        if inputPeak != 0 {
+            hasReceivedAudio = true
+            silentFrames = 0
+        } else {
+            let ringOutFrames = Int(processor.sampleRate)
+            silentFrames = min(silentFrames + frameCount, ringOutFrames)
+            if silentFrames == ringOutFrames {
+                for buffer in outputList {
+                    guard let data = buffer.mData else { continue }
+                    vDSP_vclr(data.assumingMemoryBound(to: Float.self), 1,
+                              vDSP_Length(Int(buffer.mDataByteSize) / MemoryLayout<Float>.size))
                 }
+                return
             }
         }
 
