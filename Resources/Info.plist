@@ -9,7 +9,7 @@
 	<key>CFBundleIdentifier</key>
 	<string>com.onlyeq.app</string>
 	<key>CFBundleVersion</key>
-	<string>10</string>
+	<string>11</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.2.2</string>
 	<key>CFBundleExecutable</key>

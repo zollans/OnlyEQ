@@ -95,6 +95,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             positionMenuPanel(below: button)
             NSApp.activate(ignoringOtherApps: true)
             menuPanel.makeKeyAndOrderFront(nil)
+            button.highlight(true)
+            // Reassert after the status button finishes its mouse-up tracking;
+            // AppKit otherwise clears the pressed highlight when the action returns.
+            DispatchQueue.main.async { [weak self, weak button] in
+                guard let self, self.menuPanel.isVisible else { return }
+                button?.highlight(true)
+            }
             AppState.shared.popoverIsVisible = true
         }
     }
@@ -112,8 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func hideMenuPanel() {
-        guard menuPanel.isVisible else { return }
-        menuPanel.orderOut(nil)
+        statusItem.button?.highlight(false)
+        if menuPanel.isVisible { menuPanel.orderOut(nil) }
         AppState.shared.popoverIsVisible = false
     }
 
