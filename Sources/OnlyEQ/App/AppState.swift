@@ -232,9 +232,17 @@ final class AppState: ObservableObject {
     }
 
     private func handleDefaultDeviceChanged() {
+        let previousUID = currentDevice?.uid
         refreshDevices()
         if isEnabled { rebuildEngine() }
-        applyDeviceProfileIfNeeded()
+        if previousUID != currentDevice?.uid {
+            // Stash the outgoing device's working EQ (including unsaved edits)
+            // so switching back restores it. Duplicate notifications for the
+            // same device must not re-apply anything — that would discard
+            // edits made since the profile was applied.
+            if let previousUID { store.stashWorkingPreset(preset, forDevice: previousUID) }
+            applyDeviceProfileIfNeeded()
+        }
         suggestProfileForCurrentDeviceIfNeeded()
     }
 
@@ -257,8 +265,12 @@ final class AppState: ObservableObject {
 
     private func applyDeviceProfileIfNeeded() {
         guard let device = currentDevice else { return }
-        if let profile = store.deviceProfiles[device.uid], profile.autoApply,
-           let saved = store.resolveProfilePreset(profile) {
+        if let stashed = store.workingPreset(forDevice: device.uid) {
+            // The user's last working state on this device — it already
+            // reflects the profile plus any manual edits made on top of it.
+            preset = stashed
+        } else if let profile = store.deviceProfiles[device.uid], profile.autoApply,
+                  let saved = store.resolveProfilePreset(profile) {
             preset = saved
         } else {
             // No usable assignment for the new device — reset to flat rather
@@ -295,6 +307,9 @@ final class AppState: ObservableObject {
         store.save(preset)
         store.setProfile(deviceUID: suggestion.deviceUID, deviceName: suggestion.deviceName,
                          preset: preset, autoApply: true)
+        // An explicit assignment beats whatever working state was stashed for
+        // the device — otherwise the stash would shadow it on next connect.
+        store.stashWorkingPreset(preset, forDevice: suggestion.deviceUID)
         if currentDevice?.uid == suggestion.deviceUID {
             self.preset = preset
             presetWasAutoApplied = true

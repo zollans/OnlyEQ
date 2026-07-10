@@ -7,9 +7,15 @@ final class PresetStore: ObservableObject {
     @Published private(set) var customPresets: [EQPreset] = []
     @Published var deviceProfiles: [String: DeviceProfile] = [:]  // keyed by device UID
 
+    /// Working (possibly unsaved) EQ state per device UID, stashed on output
+    /// switches so returning to a device restores manual edits instead of
+    /// discarding them.
+    private var workingPresets: [String: EQPreset] = [:]
+
     private let directory: URL
     private var presetsURL: URL { directory.appendingPathComponent("presets.json") }
     private var profilesURL: URL { directory.appendingPathComponent("profiles.json") }
+    private var workingURL: URL { directory.appendingPathComponent("working-presets.json") }
 
     var allPresets: [EQPreset] { EQPreset.builtIns + customPresets }
 
@@ -56,6 +62,15 @@ final class PresetStore: ObservableObject {
         persist()
     }
 
+    func stashWorkingPreset(_ preset: EQPreset, forDevice uid: String) {
+        workingPresets[uid] = preset
+        persist()
+    }
+
+    func workingPreset(forDevice uid: String) -> EQPreset? {
+        workingPresets[uid]
+    }
+
     func setProfile(deviceUID: String, deviceName: String, preset: EQPreset?, autoApply: Bool = true) {
         deviceProfiles[deviceUID] = DeviceProfile(
             deviceUID: deviceUID, deviceName: deviceName,
@@ -75,6 +90,10 @@ final class PresetStore: ObservableObject {
            let profiles = try? JSONDecoder().decode([String: DeviceProfile].self, from: data) {
             deviceProfiles = profiles
         }
+        if let data = try? Data(contentsOf: workingURL),
+           let working = try? JSONDecoder().decode([String: EQPreset].self, from: data) {
+            workingPresets = working
+        }
     }
 
     private func persist() {
@@ -82,5 +101,6 @@ final class PresetStore: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(customPresets).write(to: presetsURL, options: .atomic)
         try? encoder.encode(deviceProfiles).write(to: profilesURL, options: .atomic)
+        try? encoder.encode(workingPresets).write(to: workingURL, options: .atomic)
     }
 }

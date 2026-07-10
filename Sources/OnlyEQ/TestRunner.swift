@@ -30,6 +30,7 @@ enum TestRunner {
             watchdogTests()
             engineRenderTests()
             appStateTests()
+            storeTests()
         } catch {
             failures.append("Uncaught error: \(error)")
         }
@@ -117,6 +118,28 @@ enum TestRunner {
         let data = try JSONEncoder().encode(original)
         r = try PresetImporter.importData(data)
         expect(r.detectedFormat == "OnlyEQ preset" && r.preset == original, "native round trip")
+    }
+
+    private static func storeTests() {
+        // `--test` runs on the main thread (see main.swift), so touching the
+        // MainActor-isolated PresetStore directly is safe.
+        MainActor.assumeIsolated {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("OnlyEQ-tests-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+
+            let edited = EQPreset(name: "Working", preampDB: -3, bands: [
+                EQBand(type: .peak, frequency: 3000, gain: -4, q: 2),
+            ])
+            let store = PresetStore(directory: dir)
+            expect(store.workingPreset(forDevice: "uid-a") == nil, "no working preset for unknown device")
+            store.stashWorkingPreset(edited, forDevice: "uid-a")
+            expect(store.workingPreset(forDevice: "uid-a") == edited, "working preset stash round trip")
+            expect(store.workingPreset(forDevice: "uid-b") == nil, "stash is keyed by device UID")
+
+            let reloaded = PresetStore(directory: dir)
+            expect(reloaded.workingPreset(forDevice: "uid-a") == edited, "working preset stash persists to disk")
+        }
     }
 
     private static func dspTests() {
