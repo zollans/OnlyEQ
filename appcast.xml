@@ -3,32 +3,22 @@
     <channel>
         <title>OnlyEQ</title>
         <item>
-            <title>1.2.2</title>
-            <pubDate>Fri, 10 Jul 2026 11:23:54 -0700</pubDate>
+            <title>1.2.3</title>
+            <pubDate>Fri, 10 Jul 2026 11:29:23 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>15</sparkle:version>
-            <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.2
+            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.3
 
-- Removes the menu-bar popover opening and closing animation.
-- Replaces the pointed popover shell with a rounded, arrowless menu panel.
-- Makes the OnlyEQ panel appear immediately and accept input as soon as the menu-bar icon is clicked.
-- Keeps the menu-bar icon brightly highlighted while the panel is open.
-- Matches EQ-node dragging, spectrum presentation, peak metering, and volume publication to the active display refresh rate, including 120 Hz ProMotion screens.
-- Caches size-independent EQ response data during live window resizing and recalculates only bands whose parameters changed.
-- Keeps editor hosting unconstrained so AppKit edge and corner resizing remains available.
-- Fixes the real status-icon click path so the arrowless panel no longer closes immediately when mouse tracking releases key focus.
-- Uses explicit outside-click, app-deactivation, and window-opening dismissal instead of fragile key-window loss.
-- Avoids `hidesOnDeactivate` and the race-prone global mouse monitor; local window events and workspace activation now own dismissal.
-- Keeps bottom-bar labels, toggles, and buttons intact at narrow editor widths while allowing the preamp slider to shrink fluidly.
 - Rebuilds the audio engine when an output device renegotiates its sample rate, keeping filters and spectrum bins correctly tuned.
 - Stops DSP processing after prolonged digital silence, clears stale filter and limiter history before sleeping, and resumes on the first non-silent buffer.
 - Memoizes automatic preamp calculations by band values and active sample rate.
 - Eliminates periodic hidden-window layout spikes from unchanged permission-watchdog publications.
 - Remembers independent working EQ state for each output device without writing on every drag frame.
+- Removes the global mouse monitor that could race status-icon clicks while preserving the rounded, arrowless panel.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.2/OnlyEQ.app.zip" length="2474268" type="application/octet-stream" sparkle:edSignature="Y765laLqS5SWRj/rIlgvwLNtSZYPsphjhJFtrhNLXzl2Y4nBmxDG+JD9GEZ4tcA2+02d38zxCHfMijBwkkzuCw=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.3/OnlyEQ.app.zip" length="2474272" type="application/octet-stream" sparkle:edSignature="mpu+GW6ti7Tv6cg4Q4YNdITXnAm8ba2NrHeY22A6E7CVE6VRLTy9dRXdt/WaSjhz7QNukCpKzWHmwqCmqjm3Dw=="/>
         </item>
     </channel>
 </rss>
