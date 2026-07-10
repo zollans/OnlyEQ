@@ -156,8 +156,12 @@ enum PresetImporter {
         guard points.count >= 2 else { throw ImportError.empty }
         points.sort { $0.f < $1.f }
 
-        // Sample the graphic curve at 10 standard centers as Q 1.41 peaking bands.
-        let centers: [Double] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+        // Sample the graphic curve at the 31 ISO third-octave centers. The Q
+        // matching that spacing — sqrt(2^(1/3)) / (2^(1/3) − 1) ≈ 4.318 — keeps
+        // adjacent-band overlap from distorting the sampled gains.
+        let centers: [Double] = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200,
+                                 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000,
+                                 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000]
         func interpolate(_ f: Double) -> Double {
             if f <= points[0].f { return points[0].g }
             if f >= points[points.count - 1].f { return points[points.count - 1].g }
@@ -168,14 +172,14 @@ enum PresetImporter {
             }
             return 0
         }
-        let bands = centers.map { EQBand(type: .peak, frequency: $0, gain: (interpolate($0) * 10).rounded() / 10, q: 1.41) }
+        let bands = centers.map { EQBand(type: .peak, frequency: $0, gain: (interpolate($0) * 10).rounded() / 10, q: 4.318) }
         // Graphic exports usually bake preamp in (max gain ≤ 0); if not, compensate.
         let maxGain = bands.map(\.gain).max() ?? 0
         let preamp = maxGain > 0 ? -maxGain : 0
         return ImportResult(
             preset: EQPreset(name: "Imported", preampDB: preamp, bands: bands, source: "GraphicEQ"),
             detectedFormat: "GraphicEQ (Wavelet)",
-            warnings: ["Graphic curve was fitted onto 10 parametric bands."]
+            warnings: ["Graphic curve was fitted onto 31 parametric bands."]
         )
     }
 

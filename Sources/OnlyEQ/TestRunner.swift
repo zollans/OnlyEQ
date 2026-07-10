@@ -45,12 +45,19 @@ enum TestRunner {
 
         r = try PresetImporter.importData(fixture("graphiceq.txt"))
         expect(r.detectedFormat == "GraphicEQ (Wavelet)", "graphiceq format")
-        expect(r.preset.bands.count == 10, "graphiceq 10 bands")
-        expect(r.preset.bands.allSatisfy { $0.type == .peak && $0.q == 1.41 }, "graphiceq peaking Q1.41")
+        expect(r.preset.bands.count == 31, "graphiceq 31 ISO third-octave bands")
+        expect(r.preset.bands.allSatisfy { $0.type == .peak && near($0.q, 4.318) }, "graphiceq third-octave Q")
         expect(r.preset.preampDB == 0, "graphiceq no preamp for negative gains")
         if let b125 = r.preset.bands.first(where: { $0.frequency == 125 }) {
-            expect(b125.gain < -2.0 && b125.gain > -3.0, "graphiceq interpolation")
+            expect(near(b125.gain, -2.3), "graphiceq interpolation at 125 Hz")
         } else { expect(false, "graphiceq 125 Hz band exists") }
+        if let b315 = r.preset.bands.first(where: { $0.frequency == 315 }) {
+            expect(near(b315.gain, -2.7), "graphiceq interpolation at 315 Hz")
+        } else { expect(false, "graphiceq 315 Hz band exists") }
+        expect(r.preset.bands.first?.frequency == 20 && near(r.preset.bands.first?.gain ?? 0, -0.2),
+               "graphiceq clamps below first point")
+        expect(r.preset.bands.last?.frequency == 20000 && near(r.preset.bands.last?.gain ?? 0, -6.4),
+               "graphiceq clamps above last point")
 
         r = try PresetImporter.importData(fixture("poweramp.json"))
         expect(r.detectedFormat == "Poweramp JSON", "poweramp format")
