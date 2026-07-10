@@ -159,15 +159,20 @@ final class AppState: ObservableObject {
     private func startSilenceWatchdog() {
         guard !Self.screenshotMode else { return }
         silenceCheckTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.engine.hasReceivedAudio { self.audioConfirmedThisSession = true }
-                self.suspectedPermissionIssue = self.isEnabled
-                    && self.engineState == .running
-                    && !self.engine.hasReceivedAudio
-                    && !self.audioConfirmedThisSession
-            }
+            Task { @MainActor in self?.silenceWatchdogTick() }
         }
+        silenceCheckTimer?.tolerance = 1
+    }
+
+    func silenceWatchdogTick() {
+        if engine.hasReceivedAudio { audioConfirmedThisSession = true }
+        let suspected = isEnabled
+            && engineState == .running
+            && !engine.hasReceivedAudio
+            && !audioConfirmedThisSession
+        // @Published republishes unchanged values, and every publish re-layouts
+        // each alive (hidden) window's SwiftUI tree — a visible CPU blip per tick.
+        if suspected != suspectedPermissionIssue { suspectedPermissionIssue = suspected }
     }
 
     // MARK: - Devices

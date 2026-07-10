@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Minimal self-test harness (CLT has no XCTest). Run with `swift run OnlyEQ --test`.
@@ -25,6 +26,7 @@ enum TestRunner {
         do {
             try importerTests()
             dspTests()
+            watchdogTests()
         } catch {
             failures.append("Uncaught error: \(error)")
         }
@@ -190,5 +192,23 @@ enum TestRunner {
         expect(HeadphoneNameMatcher.score(query: "WH-1000XM5", candidate: "Sony WH-1000XM5")
                > HeadphoneNameMatcher.score(query: "WH-1000XM5", candidate: "Sony WH-1000XM4"),
                "headphone matcher prioritizes exact model number")
+    }
+
+    /// Every objectWillChange re-layouts each alive (hidden) window's SwiftUI
+    /// tree, so steady-state watchdog ticks must not publish.
+    private static func watchdogTests() {
+        MainActor.assumeIsolated {
+            AppState.screenshotMode = true  // no engine, no persistence
+            let state = AppState.shared
+            state.engineState = .stopped
+
+            var publishes = 0
+            let subscription = state.objectWillChange.sink { _ in publishes += 1 }
+            withExtendedLifetime(subscription) {
+                state.silenceWatchdogTick()
+                state.silenceWatchdogTick()
+            }
+            expect(publishes == 0, "watchdog ticks publish only on change")
+        }
     }
 }
