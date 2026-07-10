@@ -58,6 +58,14 @@ final class EQProcessor {
         }
     }
 
+    /// Audio thread only. Clear filter and limiter history before the engine
+    /// enters its prolonged-silence fast path. Keeping the existing storage
+    /// avoids allocating from the realtime callback.
+    func resetRenderState() {
+        for index in states.indices { states[index] = BiquadState() }
+        limiterEnvelope = 0
+    }
+
     /// Called from the UI/model thread whenever parameters change.
     func update(bands: [EQBand], preampDB: Double, outputGainDB: Double = 0,
                 limiterEnabled: Bool, limiterCeilingDB: Double, bypassed: Bool) {

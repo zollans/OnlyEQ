@@ -259,6 +259,25 @@ enum TestRunner {
         expect(staleOutput.allSatisfy { $0 == 0 }, "silent input renders silent output after ring-out")
         expect(!engine.hasReceivedAudio, "pure silence never marks the tap as live")
 
+        // Entering the idle path must discard filter/limiter history. Otherwise
+        // stale state from a second earlier can leak into the first resumed buffer.
+        let stateProcessor = EQProcessor()
+        stateProcessor.configure(sampleRate: 48_000)
+        stateProcessor.update(
+            bands: [EQBand(type: .peak, frequency: 40, gain: 12, q: 20)],
+            preampDB: 0, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false
+        )
+        var primingTone = (0..<512).map { Float(sin(Double($0) * 2 * .pi * 40 / 48_000)) }
+        primingTone.withUnsafeMutableBufferPointer {
+            stateProcessor.process(channels: [$0.baseAddress!], frameCount: $0.count)
+        }
+        stateProcessor.resetRenderState()
+        var resetSilence = [Float](repeating: 0, count: 512)
+        resetSilence.withUnsafeMutableBufferPointer {
+            stateProcessor.process(channels: [$0.baseAddress!], frameCount: $0.count)
+        }
+        expect(resetSilence.allSatisfy { $0 == 0 }, "silence gate clears realtime DSP history")
+
         // The first non-silent buffer after prolonged silence passes through
         // immediately (no dropout from the idle path).
         var tone = (0..<frames * channels).map {

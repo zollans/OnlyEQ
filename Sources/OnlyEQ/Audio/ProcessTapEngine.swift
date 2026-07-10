@@ -45,6 +45,7 @@ final class ProcessTapEngine {
     private var activeChannels: [UnsafeMutablePointer<Float>] = []
     /// Consecutive all-zero input frames, saturated at one second's worth.
     private var silentFrames = 0
+    private var isSilenceGated = false
 
     var onStateChange: ((State) -> Void)?
 
@@ -135,6 +136,7 @@ final class ProcessTapEngine {
         // 3. IOProc: tapped audio arrives as input, processed audio leaves as output.
         hasReceivedAudio = false
         silentFrames = 0
+        isSilenceGated = false
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) { [weak self] _, inInputData, _, outOutputData, _ in
             self?.render(input: inInputData, output: outOutputData)
         }
@@ -283,10 +285,15 @@ final class ProcessTapEngine {
         if inputPeak != 0 {
             hasReceivedAudio = true
             silentFrames = 0
+            isSilenceGated = false
         } else {
             let ringOutFrames = Int(processor.sampleRate)
             silentFrames = min(silentFrames + frameCount, ringOutFrames)
             if silentFrames == ringOutFrames {
+                if !isSilenceGated {
+                    processor.resetRenderState()
+                    isSilenceGated = true
+                }
                 for buffer in outputList {
                     guard let data = buffer.mData else { continue }
                     vDSP_vclr(data.assumingMemoryBound(to: Float.self), 1,
