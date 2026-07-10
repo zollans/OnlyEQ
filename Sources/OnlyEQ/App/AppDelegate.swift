@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var menuPanel: MenuPanel!
     private var localMouseMonitor: Any?
-    private var globalMouseMonitor: Any?
     private var workspaceActivationObserver: NSObjectProtocol?
     private var hidePanelObserver: NSObjectProtocol?
     private let updaterController = SPUStandardUpdaterController(
@@ -77,7 +76,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
-        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         if let workspaceActivationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
         }
@@ -129,12 +127,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return event
         }
 
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            Task { @MainActor in self?.hideMenuPanel() }
-        }
-
+        // The panel activates this accessory app while open, so an outside
+        // click is represented reliably by another workspace application
+        // becoming active. A global mouse monitor is both redundant and unsafe:
+        // status-item clicks are hosted out of process and appear there before
+        // the button's mouse-up action, which can hide then immediately reopen.
         workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main

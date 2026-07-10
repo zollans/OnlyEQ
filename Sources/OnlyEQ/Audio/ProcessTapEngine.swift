@@ -214,6 +214,11 @@ final class ProcessTapEngine {
         var addr = Self.sampleRateAddress
         if AudioObjectAddPropertyListenerBlock(deviceID, &addr, .main, block) == noErr {
             sampleRateListener = block
+            // Close the small gap between the initial rate read and listener
+            // installation: a device can renegotiate while the aggregate starts.
+            if AudioDeviceManager.nominalSampleRate(deviceID) != processor.sampleRate {
+                onSampleRateChange?()
+            }
         }
     }
 

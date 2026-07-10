@@ -91,13 +91,15 @@ final class AppState: ObservableObject {
 
     /// autoPreamp scans a 512-point response curve; during a band drag this is
     /// read ~120×/s with unchanged bands, so memoize on the band values.
-    private var autoPreampCache: (bands: [EQBand], value: Double)?
+    private var autoPreampCache: (bands: [EQBand], sampleRate: Double, value: Double)?
 
     var effectivePreampDB: Double {
         guard autoPreampEnabled else { return preset.preampDB }
-        if let cache = autoPreampCache, cache.bands == preset.bands { return cache.value }
-        let value = EQResponse.autoPreamp(bands: preset.bands)
-        autoPreampCache = (preset.bands, value)
+        let sampleRate = engine.processor.sampleRate
+        if let cache = autoPreampCache,
+           cache.bands == preset.bands, cache.sampleRate == sampleRate { return cache.value }
+        let value = EQResponse.autoPreamp(bands: preset.bands, sampleRate: sampleRate)
+        autoPreampCache = (preset.bands, sampleRate, value)
         return value
     }
 
@@ -106,6 +108,9 @@ final class AppState: ObservableObject {
     private var deviceListenerInstalled = false
     private var silenceCheckTimer: Timer?
     private var pendingPresetPersistence: DispatchWorkItem?
+    private var pendingPresetSnapshot: (deviceUID: String, preset: EQPreset)?
+    private var isRestoringWorkingPreset = false
+    private var sampleRateRebuildScheduled = false
     private var suggestedDeviceUIDs = Set(UserDefaults.standard.stringArray(forKey: "profileSuggestion.seenDeviceUIDs") ?? [])
     private var currentDeviceHasHardwareVolume = false
     private var lastPushedSoftwareGainDB = Double.nan
@@ -118,8 +123,8 @@ final class AppState: ObservableObject {
     // MARK: - Setup
 
     private init() {
-        restoreWorkingPreset()
         refreshDevices()
+        restoreWorkingPresetForCurrentDevice(migrateLegacyPreset: true)
         installDeviceListeners()
         engine.onStateChange = { [weak self] state in
             Task { @MainActor in self?.engineState = state }
@@ -128,7 +133,7 @@ final class AppState: ObservableObject {
         // MIDI Setup) invalidates the biquad coefficients; rebuild everything
         // at the new rate.
         engine.onSampleRateChange = { [weak self] in
-            Task { @MainActor in self?.rebuildEngine() }
+            Task { @MainActor in self?.scheduleSampleRateRebuild() }
         }
         rebuildEngine()
         startSilenceWatchdog()
@@ -147,6 +152,19 @@ final class AppState: ObservableObject {
             engine.stop()
         }
         refreshDevices()
+    }
+
+    private func scheduleSampleRateRebuild() {
+        guard !sampleRateRebuildScheduled else { return }
+        sampleRateRebuildScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.sampleRateRebuildScheduled = false
+            let deviceID = self.engine.targetDeviceID
+            guard self.isEnabled, self.engine.state == .running, deviceID != 0,
+                  AudioDeviceManager.nominalSampleRate(deviceID) != self.engine.processor.sampleRate else { return }
+            self.rebuildEngine()
+        }
     }
 
     private func pushToProcessor() {
@@ -232,18 +250,17 @@ final class AppState: ObservableObject {
     }
 
     private func handleDefaultDeviceChanged() {
+        let previousID = currentDevice?.id
         let previousUID = currentDevice?.uid
+        // Commit the outgoing device snapshot before refresh changes the UID
+        // that future edits belong to.
+        flushWorkingPresetPersistence()
         refreshDevices()
-        if isEnabled { rebuildEngine() }
+        if isEnabled, previousID != currentDevice?.id { rebuildEngine() }
         if previousUID != currentDevice?.uid {
-            // Stash the outgoing device's working EQ (including unsaved edits)
-            // so switching back restores it. Duplicate notifications for the
-            // same device must not re-apply anything — that would discard
-            // edits made since the profile was applied.
-            if let previousUID { store.stashWorkingPreset(preset, forDevice: previousUID) }
-            applyDeviceProfileIfNeeded()
+            restoreWorkingPresetForCurrentDevice()
+            suggestProfileForCurrentDeviceIfNeeded()
         }
-        suggestProfileForCurrentDeviceIfNeeded()
     }
 
     private func suggestProfileForCurrentDeviceIfNeeded() {
@@ -263,22 +280,36 @@ final class AppState: ObservableObject {
                                               searchQuery: query))
     }
 
-    private func applyDeviceProfileIfNeeded() {
+    private func restoreWorkingPresetForCurrentDevice(migrateLegacyPreset: Bool = false) {
+        guard !Self.screenshotMode else { return }
         guard let device = currentDevice else { return }
-        if let stashed = store.workingPreset(forDevice: device.uid) {
-            // The user's last working state on this device — it already
-            // reflects the profile plus any manual edits made on top of it.
-            preset = stashed
+        let restored: EQPreset
+        let wasAutoApplied: Bool
+        if let working = store.workingPreset(forDevice: device.uid) {
+            restored = working
+            wasAutoApplied = false
+        } else if migrateLegacyPreset,
+                  let data = UserDefaults.standard.data(forKey: "workingPreset"),
+                  let legacy = try? JSONDecoder().decode(EQPreset.self, from: data) {
+            // Build 14 and earlier stored one global snapshot. Associate it
+            // with the device active during the one-time migration.
+            restored = legacy
+            wasAutoApplied = false
+            store.stashWorkingPreset(legacy, forDevice: device.uid)
+            UserDefaults.standard.removeObject(forKey: "workingPreset")
         } else if let profile = store.deviceProfiles[device.uid], profile.autoApply,
                   let saved = store.resolveProfilePreset(profile) {
-            preset = saved
+            restored = saved
+            wasAutoApplied = true
         } else {
-            // No usable assignment for the new device — reset to flat rather
-            // than carrying the previous device's EQ across (a headphone
-            // correction curve applied to speakers sounds wrong).
-            preset = .flat
+            // Never carry a headphone correction curve onto another output.
+            restored = .flat
+            wasAutoApplied = true
         }
-        presetWasAutoApplied = true
+        isRestoringWorkingPreset = true
+        preset = restored
+        isRestoringWorkingPreset = false
+        presetWasAutoApplied = wasAutoApplied
     }
 
     // MARK: - Presets
@@ -370,10 +401,13 @@ final class AppState: ObservableObject {
     // MARK: - Working preset persistence
 
     private func persistWorkingPreset() {
-        guard !Self.screenshotMode else { return }
+        guard !Self.screenshotMode, !isRestoringWorkingPreset,
+              let deviceUID = currentDevice?.uid else { return }
         pendingPresetPersistence?.cancel()
+        let snapshot = preset
+        pendingPresetSnapshot = (deviceUID, snapshot)
         let work = DispatchWorkItem { [weak self] in
-            self?.writeWorkingPreset()
+            self?.store.stashWorkingPreset(snapshot, forDevice: deviceUID)
         }
         pendingPresetPersistence = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
@@ -385,19 +419,12 @@ final class AppState: ObservableObject {
         guard !Self.screenshotMode else { return }
         pendingPresetPersistence?.cancel()
         pendingPresetPersistence = nil
-        writeWorkingPreset()
-    }
-
-    private func writeWorkingPreset() {
-        if let data = try? JSONEncoder().encode(preset) {
-            UserDefaults.standard.set(data, forKey: "workingPreset")
-        }
-    }
-
-    private func restoreWorkingPreset() {
-        if let data = UserDefaults.standard.data(forKey: "workingPreset"),
-           let saved = try? JSONDecoder().decode(EQPreset.self, from: data) {
-            preset = saved
+        if let pendingPresetSnapshot {
+            store.stashWorkingPreset(pendingPresetSnapshot.preset,
+                                     forDevice: pendingPresetSnapshot.deviceUID)
+            self.pendingPresetSnapshot = nil
+        } else if let deviceUID = currentDevice?.uid {
+            store.stashWorkingPreset(preset, forDevice: deviceUID)
         }
     }
 }

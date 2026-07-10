@@ -63,8 +63,9 @@ final class PresetStore: ObservableObject {
     }
 
     func stashWorkingPreset(_ preset: EQPreset, forDevice uid: String) {
+        guard workingPresets[uid] != preset else { return }
         workingPresets[uid] = preset
-        persist()
+        persistWorkingPresets()
     }
 
     func workingPreset(forDevice uid: String) -> EQPreset? {
@@ -101,6 +102,12 @@ final class PresetStore: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(customPresets).write(to: presetsURL, options: .atomic)
         try? encoder.encode(deviceProfiles).write(to: profilesURL, options: .atomic)
+        try? encoder.encode(workingPresets).write(to: workingURL, options: .atomic)
+    }
+
+    private func persistWorkingPresets() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(workingPresets).write(to: workingURL, options: .atomic)
     }
 }
