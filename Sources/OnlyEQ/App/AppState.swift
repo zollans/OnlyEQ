@@ -89,8 +89,16 @@ final class AppState: ObservableObject {
     @Published var popoverIsVisible = false { didSet { updateVisualizationState() } }
     @Published var editorIsVisible = false { didSet { updateVisualizationState() } }
 
+    /// autoPreamp scans a 512-point response curve; during a band drag this is
+    /// read ~120×/s with unchanged bands, so memoize on the band values.
+    private var autoPreampCache: (bands: [EQBand], value: Double)?
+
     var effectivePreampDB: Double {
-        autoPreampEnabled ? EQResponse.autoPreamp(bands: preset.bands) : preset.preampDB
+        guard autoPreampEnabled else { return preset.preampDB }
+        if let cache = autoPreampCache, cache.bands == preset.bands { return cache.value }
+        let value = EQResponse.autoPreamp(bands: preset.bands)
+        autoPreampCache = (preset.bands, value)
+        return value
     }
 
     var latencyMilliseconds: Int { Int((engine.estimatedLatency * 1000).rounded()) }
