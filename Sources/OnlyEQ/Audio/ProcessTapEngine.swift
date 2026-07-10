@@ -35,6 +35,7 @@ final class ProcessTapEngine {
     private var tapID: AudioObjectID = 0
     private var aggregateID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
+    private var sampleRateListener: AudioObjectPropertyListenerBlock?
     private var channelScratch: [UnsafeMutablePointer<Float>] = []
     private struct InputChannel {
         var pointer: UnsafeMutablePointer<Float>
@@ -42,8 +43,16 @@ final class ProcessTapEngine {
     }
     private var inputChannels: [InputChannel] = []
     private var activeChannels: [UnsafeMutablePointer<Float>] = []
+    /// Consecutive all-zero input frames, saturated at one second's worth.
+    private var silentFrames = 0
+    private var isSilenceGated = false
 
     var onStateChange: ((State) -> Void)?
+
+    /// Fired (on the main queue) when the tapped device's nominal sample rate
+    /// changes while running. Biquad coefficients are baked for one rate, so
+    /// the owner must restart the engine to stay on pitch.
+    var onSampleRateChange: (() -> Void)?
 
     init() {
         inputChannels.reserveCapacity(8)
@@ -126,6 +135,8 @@ final class ProcessTapEngine {
 
         // 3. IOProc: tapped audio arrives as input, processed audio leaves as output.
         hasReceivedAudio = false
+        silentFrames = 0
+        isSilenceGated = false
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) { [weak self] _, inInputData, _, outOutputData, _ in
             self?.render(input: inInputData, output: outOutputData)
         }
@@ -147,10 +158,12 @@ final class ProcessTapEngine {
             return
         }
 
+        installSampleRateListener(on: deviceID)
         transition(to: .running)
     }
 
     func stop() {
+        removeSampleRateListener()
         if let ioProcID, aggregateID != 0 {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
@@ -187,6 +200,35 @@ final class ProcessTapEngine {
         DispatchQueue.main.async { callback?(newState) }
     }
 
+    private static let sampleRateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+
+    private func installSampleRateListener(on deviceID: AudioObjectID) {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self,
+                  AudioDeviceManager.nominalSampleRate(deviceID) != self.processor.sampleRate else { return }
+            self.onSampleRateChange?()
+        }
+        var addr = Self.sampleRateAddress
+        if AudioObjectAddPropertyListenerBlock(deviceID, &addr, .main, block) == noErr {
+            sampleRateListener = block
+            // Close the small gap between the initial rate read and listener
+            // installation: a device can renegotiate while the aggregate starts.
+            if AudioDeviceManager.nominalSampleRate(deviceID) != processor.sampleRate {
+                onSampleRateChange?()
+            }
+        }
+    }
+
+    private func removeSampleRateListener() {
+        guard let sampleRateListener, targetDeviceID != 0 else { return }
+        var addr = Self.sampleRateAddress
+        AudioObjectRemovePropertyListenerBlock(targetDeviceID, &addr, .main, sampleRateListener)
+        self.sampleRateListener = nil
+    }
+
     private func readIOBufferSize() {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSize,
                                               mScope: kAudioObjectPropertyScopeGlobal,
@@ -212,7 +254,7 @@ final class ProcessTapEngine {
 
     // MARK: - Render path (audio thread)
 
-    private func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
+    func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
         let inputList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outputList = UnsafeMutableAudioBufferListPointer(output)
         guard inputList.count > 0, outputList.count > 0 else { return }
@@ -233,12 +275,36 @@ final class ProcessTapEngine {
         }
         guard !inputChannels.isEmpty, frameCount != .max, frameCount > 0 else { return }
 
-        if !hasReceivedAudio {
-            outer: for channel in inputChannels {
-                for i in 0..<min(frameCount, 64) where channel.pointer[i * channel.stride] != 0 {
-                    hasReceivedAudio = true
-                    break outer
+        // One peak scan of the raw input detects audio anywhere in the buffer,
+        // and a full ring-out window of exact silence means the EQ and limiter
+        // tails have decayed too — the DSP chain can idle until audio returns.
+        var inputPeak: Float = 0
+        for buffer in inputList {
+            guard let data = buffer.mData else { continue }
+            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+            guard count > 0 else { continue }
+            var peak: Float = 0
+            vDSP_maxmgv(data.assumingMemoryBound(to: Float.self), 1, &peak, vDSP_Length(count))
+            inputPeak = max(inputPeak, peak)
+        }
+        if inputPeak != 0 {
+            hasReceivedAudio = true
+            silentFrames = 0
+            isSilenceGated = false
+        } else {
+            let ringOutFrames = Int(processor.sampleRate)
+            silentFrames = min(silentFrames + frameCount, ringOutFrames)
+            if silentFrames == ringOutFrames {
+                if !isSilenceGated {
+                    processor.resetRenderState()
+                    isSilenceGated = true
                 }
+                for buffer in outputList {
+                    guard let data = buffer.mData else { continue }
+                    vDSP_vclr(data.assumingMemoryBound(to: Float.self), 1,
+                              vDSP_Length(Int(buffer.mDataByteSize) / MemoryLayout<Float>.size))
+                }
+                return
             }
         }
 

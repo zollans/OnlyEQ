@@ -1,3 +1,5 @@
+import Combine
+import CoreAudio
 import Foundation
 
 /// Minimal self-test harness (CLT has no XCTest). Run with `swift run OnlyEQ --test`.
@@ -25,6 +27,10 @@ enum TestRunner {
         do {
             try importerTests()
             dspTests()
+            watchdogTests()
+            engineRenderTests()
+            appStateTests()
+            storeTests()
         } catch {
             failures.append("Uncaught error: \(error)")
         }
@@ -114,6 +120,28 @@ enum TestRunner {
         expect(r.detectedFormat == "OnlyEQ preset" && r.preset == original, "native round trip")
     }
 
+    private static func storeTests() {
+        // `--test` runs on the main thread (see main.swift), so touching the
+        // MainActor-isolated PresetStore directly is safe.
+        MainActor.assumeIsolated {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("OnlyEQ-tests-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+
+            let edited = EQPreset(name: "Working", preampDB: -3, bands: [
+                EQBand(type: .peak, frequency: 3000, gain: -4, q: 2),
+            ])
+            let store = PresetStore(directory: dir)
+            expect(store.workingPreset(forDevice: "uid-a") == nil, "no working preset for unknown device")
+            store.stashWorkingPreset(edited, forDevice: "uid-a")
+            expect(store.workingPreset(forDevice: "uid-a") == edited, "working preset stash round trip")
+            expect(store.workingPreset(forDevice: "uid-b") == nil, "stash is keyed by device UID")
+
+            let reloaded = PresetStore(directory: dir)
+            expect(reloaded.workingPreset(forDevice: "uid-a") == edited, "working preset stash persists to disk")
+        }
+    }
+
     private static func dspTests() {
         let c = BiquadCoefficients.make(type: .peak, frequency: 1000, gainDB: 6, q: 1.41, sampleRate: 48000)
         expect(near(c.magnitudeDB(at: 1000, sampleRate: 48000), 6, 0.01), "peak magnitude at Fc")
@@ -190,5 +218,121 @@ enum TestRunner {
         expect(HeadphoneNameMatcher.score(query: "WH-1000XM5", candidate: "Sony WH-1000XM5")
                > HeadphoneNameMatcher.score(query: "WH-1000XM5", candidate: "Sony WH-1000XM4"),
                "headphone matcher prioritizes exact model number")
+    }
+
+    /// Every objectWillChange re-layouts each alive (hidden) window's SwiftUI
+    /// tree, so steady-state watchdog ticks must not publish.
+    private static func watchdogTests() {
+        MainActor.assumeIsolated {
+            AppState.screenshotMode = true  // no engine, no persistence
+            let state = AppState.shared
+            state.engineState = .stopped
+
+            var publishes = 0
+            let subscription = state.objectWillChange.sink { _ in publishes += 1 }
+            withExtendedLifetime(subscription) {
+                state.silenceWatchdogTick()
+                state.silenceWatchdogTick()
+            }
+            expect(publishes == 0, "watchdog ticks publish only on change")
+        }
+    }
+
+    /// Wraps interleaved sample storage in single-buffer AudioBufferLists and
+    /// drives the engine's render callback directly, without Core Audio.
+    private static func renderOnce(_ engine: ProcessTapEngine, channels: Int,
+                                   input: inout [Float], output: inout [Float]) {
+        input.withUnsafeMutableBufferPointer { inBuf in
+            output.withUnsafeMutableBufferPointer { outBuf in
+                var inputList = AudioBufferList(
+                    mNumberBuffers: 1,
+                    mBuffers: AudioBuffer(mNumberChannels: UInt32(channels),
+                                          mDataByteSize: UInt32(inBuf.count * MemoryLayout<Float>.size),
+                                          mData: UnsafeMutableRawPointer(inBuf.baseAddress)))
+                var outputList = AudioBufferList(
+                    mNumberBuffers: 1,
+                    mBuffers: AudioBuffer(mNumberChannels: UInt32(channels),
+                                          mDataByteSize: UInt32(outBuf.count * MemoryLayout<Float>.size),
+                                          mData: UnsafeMutableRawPointer(outBuf.baseAddress)))
+                engine.render(input: &inputList, output: &outputList)
+            }
+        }
+    }
+
+    private static func engineRenderTests() {
+        let frames = 512, channels = 2
+
+        // Audio starting later in the buffer must still mark the tap as live.
+        let lateEngine = ProcessTapEngine()
+        var lateInput = [Float](repeating: 0, count: frames * channels)
+        for frame in 100..<frames { lateInput[frame * channels] = 0.5 }
+        var output = [Float](repeating: 0, count: frames * channels)
+        renderOnce(lateEngine, channels: channels, input: &lateInput, output: &output)
+        expect(lateEngine.hasReceivedAudio, "render detects audio past the first 64 frames")
+
+        // After a full ring-out window of exact silence the output stays zeroed
+        // and the tap is still not considered live.
+        let engine = ProcessTapEngine()
+        var silence = [Float](repeating: 0, count: frames * channels)
+        for _ in 0...(Int(engine.processor.sampleRate) / frames + 1) {
+            renderOnce(engine, channels: channels, input: &silence, output: &output)
+        }
+        var staleOutput = [Float](repeating: 0.7, count: frames * channels)
+        renderOnce(engine, channels: channels, input: &silence, output: &staleOutput)
+        expect(staleOutput.allSatisfy { $0 == 0 }, "silent input renders silent output after ring-out")
+        expect(!engine.hasReceivedAudio, "pure silence never marks the tap as live")
+
+        // Entering the idle path must discard filter/limiter history. Otherwise
+        // stale state from a second earlier can leak into the first resumed buffer.
+        let stateProcessor = EQProcessor()
+        stateProcessor.configure(sampleRate: 48_000)
+        stateProcessor.update(
+            bands: [EQBand(type: .peak, frequency: 40, gain: 12, q: 20)],
+            preampDB: 0, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false
+        )
+        var primingTone = (0..<512).map { Float(sin(Double($0) * 2 * .pi * 40 / 48_000)) }
+        primingTone.withUnsafeMutableBufferPointer {
+            stateProcessor.process(channels: [$0.baseAddress!], frameCount: $0.count)
+        }
+        stateProcessor.resetRenderState()
+        var resetSilence = [Float](repeating: 0, count: 512)
+        resetSilence.withUnsafeMutableBufferPointer {
+            stateProcessor.process(channels: [$0.baseAddress!], frameCount: $0.count)
+        }
+        expect(resetSilence.allSatisfy { $0 == 0 }, "silence gate clears realtime DSP history")
+
+        // The first non-silent buffer after prolonged silence passes through
+        // immediately (no dropout from the idle path).
+        var tone = (0..<frames * channels).map {
+            Float(0.5 * sin(Double($0 / channels) * 2 * .pi * 440 / 48000))
+        }
+        var resumed = [Float](repeating: 0, count: frames * channels)
+        renderOnce(engine, channels: channels, input: &tone, output: &resumed)
+        expect((resumed.map(abs).max() ?? 0) > 0.4, "audio resumes immediately after prolonged silence")
+        expect(engine.hasReceivedAudio, "resumed audio marks the tap as live")
+    }
+
+    private static func appStateTests() {
+        MainActor.assumeIsolated {
+            AppState.screenshotMode = true  // no engine, no persistence
+            let state = AppState.shared
+            let savedPreset = state.preset
+            let savedAuto = state.autoPreampEnabled
+            defer {
+                state.preset = savedPreset
+                state.autoPreampEnabled = savedAuto
+            }
+
+            state.autoPreampEnabled = true
+            state.preset = EQPreset(name: "Auto A", bands: [EQBand(type: .peak, frequency: 1000, gain: 5, q: 1.41)])
+            expect(near(state.effectivePreampDB, -5, 0.1), "effective preamp follows auto preamp")
+            expect(near(state.effectivePreampDB, state.effectivePreampDB), "repeated reads are stable")
+            state.preset = EQPreset(name: "Auto B", bands: [EQBand(type: .peak, frequency: 1000, gain: 8, q: 1.41)])
+            expect(near(state.effectivePreampDB, -8, 0.1), "effective preamp tracks band edits")
+
+            state.autoPreampEnabled = false
+            state.preset.preampDB = -3
+            expect(state.effectivePreampDB == -3, "manual preamp used when auto is off")
+        }
     }
 }
