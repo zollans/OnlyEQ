@@ -28,8 +28,8 @@ final class ProcessTapEngine {
         Double(ioBufferFrames) * 2 / max(processor.sampleRate, 1)
     }
 
-    /// True once the tap has delivered at least one non-empty buffer — used to
-    /// distinguish "no permission" (silent tap) from "no audio playing".
+    /// True once the tap has delivered non-silent audio, confirming that the
+    /// current engine instance is receiving the system mix.
     private(set) var hasReceivedAudio = false
 
     private var tapID: AudioObjectID = 0

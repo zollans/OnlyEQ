@@ -313,6 +313,50 @@ enum TestRunner {
     }
 
     private static func appStateTests() {
+        expect(
+            !AppState.shouldSuggestAudioAccessCheck(
+                isEnabled: true,
+                engineIsRunning: true,
+                hasReceivedAudio: false,
+                audioAccessConfirmed: true
+            ),
+            "confirmed audio access stays valid while playback is idle"
+        )
+        expect(
+            AppState.shouldSuggestAudioAccessCheck(
+                isEnabled: true,
+                engineIsRunning: true,
+                hasReceivedAudio: false,
+                audioAccessConfirmed: false
+            ),
+            "unconfirmed running tap suggests an audio access check"
+        )
+
+        expect(
+            AppState.routeNeedsRebuild(
+                isEnabled: true, engineTargetID: 41, defaultDeviceID: 52, defaultDeviceIsReady: true
+            ),
+            "route rebuild follows engine target after UI device refresh"
+        )
+        expect(
+            !AppState.routeNeedsRebuild(
+                isEnabled: true, engineTargetID: 52, defaultDeviceID: 52, defaultDeviceIsReady: true
+            ),
+            "route rebuild skips matching engine target"
+        )
+        expect(
+            !AppState.routeNeedsRebuild(
+                isEnabled: false, engineTargetID: 41, defaultDeviceID: 52, defaultDeviceIsReady: true
+            ),
+            "disabled engine ignores route changes"
+        )
+        expect(
+            !AppState.routeNeedsRebuild(
+                isEnabled: true, engineTargetID: 41, defaultDeviceID: 52, defaultDeviceIsReady: false
+            ),
+            "route rebuild waits for transient device topology to settle"
+        )
+
         MainActor.assumeIsolated {
             AppState.screenshotMode = true  // no engine, no persistence
             let state = AppState.shared

@@ -52,7 +52,7 @@ struct PopoverView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "chart.bar.fill")
+            Image(systemName: OnlyEQIcon.symbolName)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 24, height: 24)
@@ -194,9 +194,9 @@ struct PopoverView: View {
                     .font(.system(size: 22))
                     .foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("OnlyEQ needs System Audio access")
+                    Text("Confirm System Audio access")
                         .font(.system(size: 12, weight: .semibold))
-                    Text("Allow OnlyEQ to capture system audio so it can apply EQ in real time.")
+                    Text("Play any audio to confirm. If it stays silent, allow OnlyEQ in System Settings.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
