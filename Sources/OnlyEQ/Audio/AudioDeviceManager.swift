@@ -128,15 +128,21 @@ enum AudioDeviceManager {
 
     // MARK: - Volume
 
+    static func hardwareVolumeAddresses(_ id: AudioObjectID) -> [AudioObjectPropertyAddress] {
+        [kAudioObjectPropertyElementMain, 1, 2].compactMap { element in
+            var addr = address(kAudioDevicePropertyVolumeScalar,
+                               scope: kAudioDevicePropertyScopeOutput,
+                               element: element)
+            return AudioObjectHasProperty(id, &addr) ? addr : nil
+        }
+    }
+
     /// Hardware volume 0…1, or nil if the device has none (e.g. HDMI).
     static func hardwareVolume(_ id: AudioObjectID) -> Float? {
-        for element: AudioObjectPropertyElement in [kAudioObjectPropertyElementMain, 1] {
-            var addr = address(kAudioDevicePropertyVolumeScalar, scope: kAudioDevicePropertyScopeOutput, element: element)
-            if AudioObjectHasProperty(id, &addr) {
-                var value: Float = 0
-                var size = UInt32(MemoryLayout<Float>.size)
-                if AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr { return value }
-            }
+        for var addr in hardwareVolumeAddresses(id) {
+            var value: Float = 0
+            var size = UInt32(MemoryLayout<Float>.size)
+            if AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr { return value }
         }
         return nil
     }
