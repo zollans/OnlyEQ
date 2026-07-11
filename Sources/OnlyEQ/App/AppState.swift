@@ -114,6 +114,13 @@ final class AppState: ObservableObject {
     private var suggestedDeviceUIDs = Set(UserDefaults.standard.stringArray(forKey: "profileSuggestion.seenDeviceUIDs") ?? [])
     private var currentDeviceHasHardwareVolume = false
     private var lastPushedSoftwareGainDB = Double.nan
+    private struct HardwareVolumeListener {
+        let deviceID: AudioObjectID
+        let address: AudioObjectPropertyAddress
+        let block: AudioObjectPropertyListenerBlock
+    }
+    private var hardwareVolumeListeners: [HardwareVolumeListener] = []
+    private var observedVolumeDeviceID: AudioObjectID = 0
 
     /// Sticky per-session flag: once the tap has delivered audio we know the
     /// permission is granted, so engine restarts (device switches, settings
@@ -216,6 +223,7 @@ final class AppState: ObservableObject {
         } else {
             currentDevice = nil
         }
+        updateHardwareVolumeListeners()
         syncVolumeFromDevice()
     }
 
@@ -246,6 +254,36 @@ final class AppState: ObservableObject {
                                                   mElement: kAudioObjectPropertyElementMain)
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &listAddr, .main) { [weak self] _, _ in
             Task { @MainActor in self?.refreshDevices() }
+        }
+    }
+
+    private func updateHardwareVolumeListeners() {
+        guard !Self.screenshotMode else { return }
+        let deviceID = currentDevice?.id ?? 0
+        guard deviceID != observedVolumeDeviceID else { return }
+
+        for listener in hardwareVolumeListeners {
+            var address = listener.address
+            AudioObjectRemovePropertyListenerBlock(
+                listener.deviceID, &address, .main, listener.block
+            )
+        }
+        hardwareVolumeListeners.removeAll(keepingCapacity: true)
+        observedVolumeDeviceID = deviceID
+        guard deviceID != 0 else { return }
+
+        for var address in AudioDeviceManager.hardwareVolumeAddresses(deviceID) {
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                Task { @MainActor in
+                    guard let self, self.currentDevice?.id == deviceID else { return }
+                    self.syncVolumeFromDevice(externalChange: true)
+                }
+            }
+            if AudioObjectAddPropertyListenerBlock(deviceID, &address, .main, block) == noErr {
+                hardwareVolumeListeners.append(
+                    HardwareVolumeListener(deviceID: deviceID, address: address, block: block)
+                )
+            }
         }
     }
 
@@ -381,7 +419,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func syncVolumeFromDevice() {
+    private func syncVolumeFromDevice(externalChange: Bool = false) {
         guard let device = currentDevice else {
             currentDeviceHasHardwareVolume = false
             return
@@ -391,10 +429,15 @@ final class AppState: ObservableObject {
             return
         }
         currentDeviceHasHardwareVolume = true
-        // Only reflect hardware volume when we're not boosting.
-        if volumePercent <= 100 {
+        // Preserve intentional software boost during routine refreshes. A real
+        // hardware-volume event is an explicit user adjustment, so reflect it
+        // even when the UI was previously above 100%.
+        if externalChange || volumePercent <= 100 {
             let percent = Double(hw) * 100
-            if abs(percent - volumePercent) > 1 { volumePercent = percent }
+            if abs(percent - volumePercent) > 0.5 {
+                if externalChange { Log.write("volume: external \(percent.rounded())%") }
+                volumePercent = percent
+            }
         }
     }
 

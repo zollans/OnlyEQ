@@ -4,9 +4,9 @@
         <title>OnlyEQ</title>
         <item>
             <title>1.2.3</title>
-            <pubDate>Fri, 10 Jul 2026 13:29:41 -0700</pubDate>
+            <pubDate>Fri, 10 Jul 2026 21:14:38 -0700</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>17</sparkle:version>
+            <sparkle:version>18</sparkle:version>
             <sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.3
@@ -18,8 +18,10 @@
 - Eliminates periodic hidden-window layout spikes from unchanged permission-watchdog publications.
 - Remembers independent working EQ state for each output device without writing on every drag frame.
 - Removes the global mouse monitor that could race status-icon clicks while preserving the rounded, arrowless panel.
+- Reflects keyboard, Control Center, and other external output-volume changes live while OnlyEQ is open.
+- Shows the current output percentage beside the volume slider and aligns every scale label to the slider's exact knob positions.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.3/OnlyEQ.app.zip" length="2473985" type="application/octet-stream" sparkle:edSignature="qjHeGD46c2DcZntWiw09NiKqct8AWaBtr1Sk1FQT1q+h04fw2fAXtuL5hiUjonipr7nnHudX7vCZrLv8K4RaDw=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.3/OnlyEQ.app.zip" length="2484925" type="application/octet-stream" sparkle:edSignature="cb6FoIw9cP7qObcuynDOySCgGokEC3FzG/SHWqe73je53/3eRBsFp8zOFB+ExnAyjhCdPwc1tIFFMzBK6frxDQ=="/>
         </item>
     </channel>
 </rss>

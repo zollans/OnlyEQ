@@ -272,6 +272,7 @@ struct PopoverView: View {
 struct BoostSlider: View {
     @Binding var value: Double
     var maxPercent: Double
+    private let knobDiameter: CGFloat = 15
     @State private var trackedValue: Double?
     @State private var lastPublishedTime: TimeInterval = 0
     @State private var publicationInterval: TimeInterval = 1.0 / 60.0
@@ -284,31 +285,40 @@ struct BoostSlider: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
+                Text("\(Int(displayedValue.rounded()))%")
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+                    .accessibilityLabel("Output volume")
+                    .accessibilityValue("\(Int(displayedValue.rounded())) percent")
                 GeometryReader { geo in
                     let width = geo.size.width
                     let fraction = min(max(displayedValue / maxPercent, 0), 1)
                     let hundred = min(100 / maxPercent, 1)
+                    let knobX = sliderPosition(for: fraction, width: width)
+                    let hundredX = sliderPosition(for: hundred, width: width)
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.12)).frame(height: 5)
                         Capsule().fill(Color.accentColor)
-                            .frame(width: min(fraction, hundred) * width, height: 5)
+                            .frame(width: displayedValue > 0 ? min(knobX, hundredX) : 0, height: 5)
                         if displayedValue > 100 {
                             Rectangle().fill(.orange)
-                                .frame(width: (fraction - hundred) * width, height: 5)
-                                .offset(x: hundred * width)
+                                .frame(width: max(knobX - hundredX, 0), height: 5)
+                                .offset(x: hundredX)
                         }
                         // 100 % tick.
                         if maxPercent > 100 {
                             RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.primary.opacity(0.35))
                                 .frame(width: 2, height: 9)
-                                .offset(x: hundred * width - 1)
+                                .offset(x: hundredX - 1)
                         }
                         Circle()
                             .fill(.white)
-                            .frame(width: 15, height: 15)
+                            .frame(width: knobDiameter, height: knobDiameter)
                             .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
-                            .offset(x: fraction * (width - 15))
+                            .offset(x: knobX - knobDiameter / 2)
                     }
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -338,21 +348,30 @@ struct BoostSlider: View {
                 let width = geo.size.width
                 let hundred = min(100 / maxPercent, 1)
                 ZStack(alignment: .topLeading) {
-                    Text("0%").offset(x: 0)
-                    Text("100%").offset(x: hundred * width - 12)
-                    Text("\(Int(maxPercent))%").offset(x: width - 26)
+                    Text("0%")
+                        .position(x: sliderPosition(for: 0, width: width), y: 5)
+                    Text("100%")
+                        .position(x: sliderPosition(for: hundred, width: width), y: 5)
+                    Text("\(Int(maxPercent))%")
+                        .position(x: sliderPosition(for: 1, width: width), y: 5)
                 }
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
             }
             .frame(height: 11)
-            .padding(.leading, 24)
+            // Match the icon + spacing + fixed percentage field + spacing
+            // above so 0%, 100%, and max stay under the actual track.
+            .padding(.leading, 68)
         }
     }
 
     private func sliderValue(at x: CGFloat, width: CGFloat) -> Double {
-        guard width > 15 else { return value }
-        return min(max(Double((x - 7.5) / (width - 15)) * maxPercent, 0), maxPercent)
+        guard width > knobDiameter else { return value }
+        return min(max(Double((x - knobDiameter / 2) / (width - knobDiameter)) * maxPercent, 0), maxPercent)
+    }
+
+    private func sliderPosition(for fraction: Double, width: CGFloat) -> CGFloat {
+        knobDiameter / 2 + CGFloat(fraction) * max(width - knobDiameter, 0)
     }
 }
 
