@@ -53,7 +53,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "OnlyEQ")
+            let icon = NSImage(
+                systemSymbolName: OnlyEQIcon.symbolName,
+                accessibilityDescription: "OnlyEQ"
+            )
+            // Template rendering keeps the mark consistent in light/dark menu
+            // bars and white-ish while the custom panel is highlighted open.
+            icon?.isTemplate = true
+            button.image = icon
             button.action = #selector(statusItemClicked(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])

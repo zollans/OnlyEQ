@@ -59,8 +59,8 @@ final class AppState: ObservableObject {
     @Published private(set) var currentDevice: AudioOutputDevice?
     @Published var engineState: ProcessTapEngine.State = .stopped
 
-    /// True when the engine runs but has never seen a sample — the strongest
-    /// signal we have that System Audio Recording permission is missing.
+    /// True until this installation has successfully processed system audio.
+    /// Digital silence alone cannot prove that permission is missing.
     @Published private(set) var suspectedPermissionIssue = false
 
     @Published var excludedBundleIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "excludedApps") ?? ["com.apple.garageband10", "us.zoom.xos"]) {
@@ -106,6 +106,9 @@ final class AppState: ObservableObject {
     var latencyMilliseconds: Int { Int((engine.estimatedLatency * 1000).rounded()) }
 
     private var deviceListenerInstalled = false
+    private var audioTopologyGeneration: UInt = 0
+    private var handledDeviceUID: String?
+    private var engineAudioConfirmationLogged = false
     private var silenceCheckTimer: Timer?
     private var pendingPresetPersistence: DispatchWorkItem?
     private var pendingPresetSnapshot: (deviceUID: String, preset: EQPreset)?
@@ -122,15 +125,15 @@ final class AppState: ObservableObject {
     private var hardwareVolumeListeners: [HardwareVolumeListener] = []
     private var observedVolumeDeviceID: AudioObjectID = 0
 
-    /// Sticky per-session flag: once the tap has delivered audio we know the
-    /// permission is granted, so engine restarts (device switches, settings
-    /// changes) while playback is paused must not re-raise the banner.
-    private var audioConfirmedThisSession = false
+    /// Once the tap has delivered audio we know access worked. Remember that
+    /// across launches so an idle Mac never raises a false permission warning.
+    private var audioAccessConfirmed = UserDefaults.standard.bool(forKey: "audioAccessConfirmed")
 
     // MARK: - Setup
 
     private init() {
         refreshDevices()
+        handledDeviceUID = currentDevice?.uid
         restoreWorkingPresetForCurrentDevice(migrateLegacyPreset: true)
         installDeviceListeners()
         engine.onStateChange = { [weak self] state in
@@ -151,6 +154,7 @@ final class AppState: ObservableObject {
     func rebuildEngine() {
         guard !Self.screenshotMode else { return }
         if isEnabled {
+            engineAudioConfirmationLogged = false
             engine.start(excludedBundleIDs: excludedBundleIDs)
             engine.setIOBufferFrames(bufferFrames)
             pushToProcessor()
@@ -204,14 +208,34 @@ final class AppState: ObservableObject {
     }
 
     func silenceWatchdogTick() {
-        if engine.hasReceivedAudio { audioConfirmedThisSession = true }
-        let suspected = isEnabled
-            && engineState == .running
-            && !engine.hasReceivedAudio
-            && !audioConfirmedThisSession
+        if engine.hasReceivedAudio {
+            if !audioAccessConfirmed {
+                audioAccessConfirmed = true
+                UserDefaults.standard.set(true, forKey: "audioAccessConfirmed")
+            }
+            if !engineAudioConfirmationLogged {
+                engineAudioConfirmationLogged = true
+                Log.write("engine: audio confirmed on device \(engine.targetDeviceID)")
+            }
+        }
+        let suspected = Self.shouldSuggestAudioAccessCheck(
+            isEnabled: isEnabled,
+            engineIsRunning: engineState == .running,
+            hasReceivedAudio: engine.hasReceivedAudio,
+            audioAccessConfirmed: audioAccessConfirmed
+        )
         // @Published republishes unchanged values, and every publish re-layouts
         // each alive (hidden) window's SwiftUI tree — a visible CPU blip per tick.
         if suspected != suspectedPermissionIssue { suspectedPermissionIssue = suspected }
+    }
+
+    nonisolated static func shouldSuggestAudioAccessCheck(
+        isEnabled: Bool,
+        engineIsRunning: Bool,
+        hasReceivedAudio: Bool,
+        audioAccessConfirmed: Bool
+    ) -> Bool {
+        isEnabled && engineIsRunning && !hasReceivedAudio && !audioAccessConfirmed
     }
 
     // MARK: - Devices
@@ -246,14 +270,33 @@ final class AppState: ObservableObject {
                                                      mScope: kAudioObjectPropertyScopeGlobal,
                                                      mElement: kAudioObjectPropertyElementMain)
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultAddr, .main) { [weak self] _, _ in
-            Task { @MainActor in self?.handleDefaultDeviceChanged() }
+            Task { @MainActor in self?.scheduleAudioTopologyRefresh() }
         }
 
         var listAddr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
                                                   mScope: kAudioObjectPropertyScopeGlobal,
                                                   mElement: kAudioObjectPropertyElementMain)
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &listAddr, .main) { [weak self] _, _ in
-            Task { @MainActor in self?.refreshDevices() }
+            Task { @MainActor in self?.scheduleAudioTopologyRefresh() }
+        }
+    }
+
+    /// Device-list and default-output notifications can arrive in either order.
+    /// Debouncing lets Core Audio finish publishing the new topology before we
+    /// rebuild. The later reconciliation handles daemon/device transitions that
+    /// briefly expose an intermediate object ID without another notification.
+    private func scheduleAudioTopologyRefresh() {
+        audioTopologyGeneration &+= 1
+        let generation = audioTopologyGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            guard self.audioTopologyGeneration == generation else { return }
+            self.handleAudioTopologyChanged()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            guard self.audioTopologyGeneration == generation else { return }
+            self.handleAudioTopologyChanged()
         }
     }
 
@@ -287,18 +330,42 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func handleDefaultDeviceChanged() {
-        let previousID = currentDevice?.id
-        let previousUID = currentDevice?.uid
+    private func handleAudioTopologyChanged() {
+        let previousUID = handledDeviceUID
         // Commit the outgoing device snapshot before refresh changes the UID
         // that future edits belong to.
         flushWorkingPresetPersistence()
         refreshDevices()
-        if isEnabled, previousID != currentDevice?.id { rebuildEngine() }
-        if previousUID != currentDevice?.uid {
+        let defaultDeviceID = AudioDeviceManager.defaultOutputDeviceID()
+
+        // `currentDevice` is UI state and may already have been refreshed by a
+        // device-list notification. Compare against the engine's actual route;
+        // otherwise the later default-device notification can look unchanged
+        // while audio is still attached to the disconnected output.
+        if Self.routeNeedsRebuild(
+            isEnabled: isEnabled,
+            engineTargetID: engine.targetDeviceID,
+            defaultDeviceID: defaultDeviceID,
+            defaultDeviceIsReady: currentDevice != nil
+        ) {
+            Log.write("device: rebuilding route \(engine.targetDeviceID) -> \(defaultDeviceID ?? 0) (\(currentDevice?.name ?? "unavailable"))")
+            rebuildEngine()
+        }
+
+        if let currentDevice, previousUID != currentDevice.uid {
+            handledDeviceUID = currentDevice.uid
             restoreWorkingPresetForCurrentDevice()
             suggestProfileForCurrentDeviceIfNeeded()
         }
+    }
+
+    nonisolated static func routeNeedsRebuild(
+        isEnabled: Bool,
+        engineTargetID: AudioObjectID,
+        defaultDeviceID: AudioObjectID?,
+        defaultDeviceIsReady: Bool
+    ) -> Bool {
+        isEnabled && defaultDeviceIsReady && defaultDeviceID != engineTargetID
     }
 
     private func suggestProfileForCurrentDeviceIfNeeded() {
