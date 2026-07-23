@@ -124,6 +124,7 @@ final class AppState: ObservableObject {
     private var suggestedDeviceUIDs = Set(UserDefaults.standard.stringArray(forKey: "profileSuggestion.seenDeviceUIDs") ?? [])
     private var currentDeviceHasHardwareVolume = false
     private var lastPushedSoftwareGainDB = Double.nan
+    private var pendingExternalVolumeSync: DispatchWorkItem?
     private struct HardwareVolumeListener {
         let deviceID: AudioObjectID
         let address: AudioObjectPropertyAddress
@@ -329,7 +330,7 @@ final class AppState: ObservableObject {
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 Task { @MainActor in
                     guard let self, self.currentDevice?.id == deviceID else { return }
-                    self.syncVolumeFromDevice(externalChange: true)
+                    self.scheduleExternalVolumeSync()
                 }
             }
             if AudioObjectAddPropertyListenerBlock(deviceID, &address, .main, block) == noErr {
@@ -511,6 +512,28 @@ final class AppState: ObservableObject {
         guard !Self.screenshotMode, hasHardwareVolume, let device = currentDevice else { return }
         hardwareVolumeWriter.submit(deviceID: device.id,
                                     volume: Float(min(percent, 100) / 100))
+    }
+
+    /// A hardware volume-key press makes coreaudiod ramp the level and fire a
+    /// burst of change notifications — and it briefly overshoots the target by a
+    /// step before settling (e.g. 30 → 31 → 30). The overshoot is always the
+    /// *first* value reported, so publishing on the leading edge draws it as a
+    /// visible knob stutter.
+    ///
+    /// Trailing-edge throttle: the first change schedules a single read a short
+    /// window later; further notifications in that window are folded in, so we
+    /// read the *settled* value once per window rather than the overshoot. It
+    /// throttles rather than debounces (the timer is never reset), so a held key
+    /// that sweeps the volume keeps updating steadily instead of freezing until
+    /// release.
+    private func scheduleExternalVolumeSync() {
+        guard pendingExternalVolumeSync == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingExternalVolumeSync = nil
+            self?.syncVolumeFromDevice(externalChange: true)
+        }
+        pendingExternalVolumeSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     private func syncVolumeFromDevice(externalChange: Bool = false) {
