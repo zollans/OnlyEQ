@@ -104,7 +104,7 @@ struct PopoverView: View {
                     .fixedSize()
                     Spacer(minLength: 0)
                 }
-                BoostSlider(value: $state.volumePercent, maxPercent: state.maxBoostPercent)
+                BoostSlider(value: $state.userVolumePercent, maxPercent: state.maxBoostPercent)
             }
         }
     }

@@ -302,6 +302,6 @@ struct AdvancedSettings: View {
         }
         for preset in state.store.customPresets { state.store.delete(preset) }
         state.applyFlat()
-        state.volumePercent = 100
+        state.userVolumePercent = 100
     }
 }

@@ -20,7 +20,7 @@ enum ScreenshotRenderer {
             demo.source = "AutoEq"
             state.preset = demo
         }
-        state.volumePercent = 65
+        state.userVolumePercent = 65
 
         let dir = URL(fileURLWithPath: outputDir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
