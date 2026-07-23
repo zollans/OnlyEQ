@@ -50,7 +50,14 @@ final class AppState: ObservableObject {
 
     /// Volume as 0…maxBoost percent. ≤100 uses hardware volume when available;
     /// the portion above 100 % (or everything, for HDMI-style outputs) is software gain.
-    @Published var volumePercent: Double = 100 { didSet { applyVolume() } }
+    ///
+    /// Read-only from outside. Hardware observations write this directly, which
+    /// updates the UI and software gain but never touches the device. User intent
+    /// goes through `userVolumePercent` — the only path that pushes a value back
+    /// to the hardware. Keeping the hardware write out of `didSet` makes a
+    /// read→write feedback loop impossible by construction, not suppressed by a
+    /// guard: an observed value simply has no route back to a device write.
+    @Published private(set) var volumePercent: Double = 100 { didSet { applySoftwareGain() } }
     @Published var maxBoostPercent: Double = UserDefaults.standard.object(forKey: "maxBoost") as? Double ?? 200 {
         didSet { UserDefaults.standard.set(maxBoostPercent, forKey: "maxBoost") }
     }
@@ -117,6 +124,7 @@ final class AppState: ObservableObject {
     private var suggestedDeviceUIDs = Set(UserDefaults.standard.stringArray(forKey: "profileSuggestion.seenDeviceUIDs") ?? [])
     private var currentDeviceHasHardwareVolume = false
     private var lastPushedSoftwareGainDB = Double.nan
+    private var pendingExternalVolumeSync: DispatchWorkItem?
     private struct HardwareVolumeListener {
         let deviceID: AudioObjectID
         let address: AudioObjectPropertyAddress
@@ -158,7 +166,10 @@ final class AppState: ObservableObject {
             engine.start(excludedBundleIDs: excludedBundleIDs)
             engine.setIOBufferFrames(bufferFrames)
             pushToProcessor()
-            applyVolume()
+            // Push software gain only; refreshDevices() below re-syncs the true
+            // hardware volume from the device, so a rebuild never stomps a level
+            // the user changed while the engine was down.
+            applySoftwareGain()
         } else {
             engine.stop()
         }
@@ -319,7 +330,7 @@ final class AppState: ObservableObject {
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 Task { @MainActor in
                     guard let self, self.currentDevice?.id == deviceID else { return }
-                    self.syncVolumeFromDevice(externalChange: true)
+                    self.scheduleExternalVolumeSync()
                 }
             }
             if AudioObjectAddPropertyListenerBlock(deviceID, &address, .main, block) == noErr {
@@ -474,16 +485,55 @@ final class AppState: ObservableObject {
         currentDeviceHasHardwareVolume
     }
 
-    private func applyVolume() {
-        guard !Self.screenshotMode, let device = currentDevice else { return }
-        if hasHardwareVolume {
-            hardwareVolumeWriter.submit(deviceID: device.id,
-                                        volume: Float(min(volumePercent, 100) / 100))
+    /// User-intent volume: the slider and other explicit controls bind here.
+    /// Setting it updates `volumePercent` (UI + software gain) and pushes the
+    /// value to the hardware. Reads never flow through here, so a hardware
+    /// observation can never loop back into a hardware write — the write-back
+    /// feedback loop (devices quantize to their own steps, so an echoed value
+    /// rarely round-trips exactly and would retrigger endlessly) is structurally
+    /// impossible.
+    var userVolumePercent: Double {
+        get { volumePercent }
+        set {
+            volumePercent = newValue
+            pushHardwareVolume(newValue)
         }
+    }
+
+    private func applySoftwareGain() {
+        guard !Self.screenshotMode else { return }
         let outputGainDB = softwareGainDB
         if !outputGainDB.isApproximatelyEqual(to: lastPushedSoftwareGainDB) {
             pushToProcessor()
         }
+    }
+
+    private func pushHardwareVolume(_ percent: Double) {
+        guard !Self.screenshotMode, hasHardwareVolume, let device = currentDevice else { return }
+        hardwareVolumeWriter.submit(deviceID: device.id,
+                                    volume: Float(min(percent, 100) / 100))
+    }
+
+    /// A hardware volume-key press makes coreaudiod ramp the level and fire a
+    /// burst of change notifications — and it briefly overshoots the target by a
+    /// step before settling (e.g. 30 → 31 → 30). The overshoot is always the
+    /// *first* value reported, so publishing on the leading edge draws it as a
+    /// visible knob stutter.
+    ///
+    /// Trailing-edge throttle: the first change schedules a single read a short
+    /// window later; further notifications in that window are folded in, so we
+    /// read the *settled* value once per window rather than the overshoot. It
+    /// throttles rather than debounces (the timer is never reset), so a held key
+    /// that sweeps the volume keeps updating steadily instead of freezing until
+    /// release.
+    private func scheduleExternalVolumeSync() {
+        guard pendingExternalVolumeSync == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingExternalVolumeSync = nil
+            self?.syncVolumeFromDevice(externalChange: true)
+        }
+        pendingExternalVolumeSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     private func syncVolumeFromDevice(externalChange: Bool = false) {
@@ -498,7 +548,9 @@ final class AppState: ObservableObject {
         currentDeviceHasHardwareVolume = true
         // Preserve intentional software boost during routine refreshes. A real
         // hardware-volume event is an explicit user adjustment, so reflect it
-        // even when the UI was previously above 100%.
+        // even when the UI was previously above 100%. Assigning `volumePercent`
+        // directly marks this as an observation: it updates the UI and software
+        // gain but is never echoed back to the device.
         if externalChange || volumePercent <= 100 {
             let percent = Double(hw) * 100
             if abs(percent - volumePercent) > 0.5 {
