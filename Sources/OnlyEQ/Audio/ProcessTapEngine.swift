@@ -14,7 +14,9 @@ struct TapInputSelection: Equatable {
 
     static func select(tapFormat: AudioStreamBasicDescription,
                        aggregateInputFormats: [AudioStreamBasicDescription],
-                       aggregateInputChannels: [UInt32]) -> TapInputSelection? {
+                       aggregateInputChannels: [UInt32],
+                       aggregateInputStartingChannels: [UInt32] = [],
+                       physicalInputChannelCount: UInt32? = nil) -> TapInputSelection? {
         guard tapFormat.mFormatID == kAudioFormatLinearPCM,
               tapFormat.mFormatFlags & kAudioFormatFlagIsFloat != 0,
               tapFormat.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0,
@@ -26,8 +28,22 @@ struct TapInputSelection: Equatable {
             where aggregateInputChannels[index] == 2 && compatible(format, tapFormat) {
             matches.append(TapInputSelection(bufferIndex: index, channels: 2))
         }
-        guard matches.count == 1 else { return nil }
-        return matches[0]
+        if matches.count == 1 { return matches[0] }
+
+        // Some interfaces expose a physical stereo input with the exact same
+        // format as the stereo process tap. In the aggregate's input channel
+        // space, the tap starts immediately after the physical device inputs.
+        // Use that channel boundary to establish provenance without assuming
+        // that Core Audio returns the streams in a particular array order.
+        guard aggregateInputStartingChannels.count == aggregateInputFormats.count,
+              let physicalInputChannelCount,
+              physicalInputChannelCount < UInt32.max else { return nil }
+        let tapStartingChannel = physicalInputChannelCount + 1
+        let boundaryMatches = matches.filter {
+            aggregateInputStartingChannels[$0.bufferIndex] == tapStartingChannel
+        }
+        guard boundaryMatches.count == 1 else { return nil }
+        return boundaryMatches[0]
     }
 
     private static func compatible(_ lhs: AudioStreamBasicDescription, _ rhs: AudioStreamBasicDescription) -> Bool {
@@ -176,15 +192,24 @@ final class ProcessTapEngine {
         }
         aggregateID = newAggregateID
 
-        // AudioHardware process taps do not prove provenance by stream order:
-        // adjacent mono buffers could be physical input, so only one uniquely
-        // matched interleaved stereo tap stream is accepted.
+        // Prefer a unique format match. If a physical stereo input has the
+        // same format as the tap, use aggregate channel numbering to identify
+        // the tap without relying on stream-array order.
         guard let tapFormat = AudioDeviceManager.tapFormat(tapID),
               let inputFormats = AudioDeviceManager.inputStreamFormats(aggregateID),
-              let inputChannels = AudioDeviceManager.inputStreamChannelCounts(aggregateID),
-              let selection = TapInputSelection.select(tapFormat: tapFormat,
-                                                        aggregateInputFormats: inputFormats,
-                                                        aggregateInputChannels: inputChannels) else {
+              let inputChannels = AudioDeviceManager.inputStreamChannelCounts(aggregateID) else {
+            cleanup()
+            transition(to: .failed("Unsupported aggregate input topology: no unique tap stream."))
+            return
+        }
+        let selection = TapInputSelection.select(
+            tapFormat: tapFormat,
+            aggregateInputFormats: inputFormats,
+            aggregateInputChannels: inputChannels,
+            aggregateInputStartingChannels: AudioDeviceManager.inputStreamStartingChannels(aggregateID) ?? [],
+            physicalInputChannelCount: AudioDeviceManager.inputChannelCount(deviceID)
+        )
+        guard let selection else {
             cleanup()
             transition(to: .failed("Unsupported aggregate input topology: no unique tap stream."))
             return

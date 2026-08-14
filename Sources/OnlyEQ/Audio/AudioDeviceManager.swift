@@ -108,12 +108,21 @@ enum AudioDeviceManager {
     }
 
     static func outputChannelCount(_ id: AudioObjectID) -> Int {
-        var addr = address(kAudioDevicePropertyStreamConfiguration, scope: kAudioDevicePropertyScopeOutput)
+        channelCount(id, scope: kAudioDevicePropertyScopeOutput) ?? 0
+    }
+
+    static func inputChannelCount(_ id: AudioObjectID) -> UInt32? {
+        guard let count = channelCount(id, scope: kAudioDevicePropertyScopeInput) else { return nil }
+        return UInt32(exactly: count)
+    }
+
+    private static func channelCount(_ id: AudioObjectID, scope: AudioObjectPropertyScope) -> Int? {
+        var addr = address(kAudioDevicePropertyStreamConfiguration, scope: scope)
         var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size), size > 0 else { return 0 }
+        guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size), size > 0 else { return nil }
         let ptr = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
         defer { ptr.deallocate() }
-        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, ptr) == noErr else { return 0 }
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, ptr) == noErr else { return nil }
         let list = ptr.assumingMemoryBound(to: AudioBufferList.self)
         return UnsafeMutableAudioBufferListPointer(list).reduce(0) { $0 + Int($1.mNumberChannels) }
     }
@@ -135,11 +144,7 @@ enum AudioDeviceManager {
     }
 
     static func inputStreamFormats(_ id: AudioObjectID) -> [AudioStreamBasicDescription]? {
-        var streamAddress = address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(id, &streamAddress, 0, nil, &size) == noErr else { return nil }
-        var streams = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(id, &streamAddress, 0, nil, &size, &streams) == noErr else { return nil }
+        guard let streams = inputStreams(id) else { return nil }
         var formats: [AudioStreamBasicDescription] = []
         formats.reserveCapacity(streams.count)
         for stream in streams {
@@ -150,6 +155,35 @@ enum AudioDeviceManager {
             formats.append(format)
         }
         return formats
+    }
+
+    static func inputStreamStartingChannels(_ id: AudioObjectID) -> [UInt32]? {
+        guard let streams = inputStreams(id) else { return nil }
+        var startingChannels: [UInt32] = []
+        startingChannels.reserveCapacity(streams.count)
+        for stream in streams {
+            guard let startingChannel = uint32Property(stream, kAudioStreamPropertyStartingChannel) else { return nil }
+            startingChannels.append(startingChannel)
+        }
+        return startingChannels
+    }
+
+    private static func inputStreams(_ id: AudioObjectID) -> [AudioObjectID]? {
+        var streamAddress = address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &streamAddress, 0, nil, &size) == noErr else { return nil }
+        var streams = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(id, &streamAddress, 0, nil, &size, &streams) == noErr else { return nil }
+        return streams
+    }
+
+    private static func uint32Property(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32? {
+        var addr = address(selector)
+        guard AudioObjectHasProperty(id, &addr) else { return nil }
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value
     }
 
     static func inputStreamChannelCounts(_ id: AudioObjectID) -> [UInt32]? {

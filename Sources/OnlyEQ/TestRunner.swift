@@ -295,6 +295,24 @@ enum TestRunner {
         expect(TapInputSelection.select(tapFormat: nonInterleaved, aggregateInputFormats: [nonInterleaved], aggregateInputChannels: [2]) == nil, "tap selection rejects non-interleaved tap format")
         expect(TapInputSelection.select(tapFormat: stereo, aggregateInputFormats: [physical], aggregateInputChannels: [4]) == nil, "tap selection rejects missing stereo stream")
         expect(TapInputSelection.select(tapFormat: stereo, aggregateInputFormats: [stereo, stereo], aggregateInputChannels: [2, 2]) == nil, "tap selection rejects ambiguous stereo streams")
+        expect(TapInputSelection.select(tapFormat: stereo,
+                                        aggregateInputFormats: [stereo, stereo],
+                                        aggregateInputChannels: [2, 2],
+                                        aggregateInputStartingChannels: [1, 3],
+                                        physicalInputChannelCount: 2) == TapInputSelection(bufferIndex: 1, channels: 2),
+               "tap selection resolves Scarlett-style matching stereo input at channel boundary")
+        expect(TapInputSelection.select(tapFormat: stereo,
+                                        aggregateInputFormats: [stereo, stereo],
+                                        aggregateInputChannels: [2, 2],
+                                        aggregateInputStartingChannels: [3, 1],
+                                        physicalInputChannelCount: 2) == TapInputSelection(bufferIndex: 0, channels: 2),
+               "tap selection uses channel provenance rather than stream-array order")
+        expect(TapInputSelection.select(tapFormat: stereo,
+                                        aggregateInputFormats: [stereo, stereo],
+                                        aggregateInputChannels: [2, 2],
+                                        aggregateInputStartingChannels: [1, 3],
+                                        physicalInputChannelCount: 4) == nil,
+               "tap selection rejects matching streams without the expected channel boundary")
 
         let reversedEngine = ProcessTapEngine(preparedInput: TapInputSelection(bufferIndex: 0, channels: 2))
         var reversedTapInput = (0..<frames).flatMap { _ in [Float(0.125), Float(-0.25)] }
