@@ -93,7 +93,11 @@ final class EQProcessor {
             os_unfair_lock_unlock(&lock)
         }
         let snap = snapshot
-        if snap.bypassed { return }
+        // Bypass skips the EQ (preamp + bands) but keeps the output gain and
+        // limiter: on devices without hardware volume the output gain is the
+        // volume control, and dropping it would jump to full level.
+        let applyEQ = !snap.bypassed
+        let preampLinear: Float = applyEQ ? snap.preampLinear : 1
 
         // (Re)size filter state to match topology.
         let channelCount = channels.count
@@ -120,8 +124,8 @@ final class EQProcessor {
                         // Stereo-linked limiter: find the loudest post-EQ sample across channels.
                         var maxMag: Float = 0
                         for ch in 0..<channelCount {
-                            var sample = channelBuffers[ch][frame] * snap.preampLinear
-                            if bandCount > 0, let stateBase, let coefficientBase {
+                            var sample = channelBuffers[ch][frame] * preampLinear
+                            if applyEQ, bandCount > 0, let stateBase, let coefficientBase {
                                 let channelStates = stateBase + ch * bandCount
                                 for band in 0..<bandCount {
                                     sample = channelStates[band].process(sample, coefficientBase[band])

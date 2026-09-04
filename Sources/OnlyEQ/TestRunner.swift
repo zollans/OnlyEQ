@@ -140,6 +140,17 @@ enum TestRunner {
         r = try PresetImporter.importText("Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB BW Oct 1")
         expect(near(r.preset.bands[0].q, 1.414, 0.01), "BW Oct → Q conversion")
 
+        r = try PresetImporter.importText("""
+            Filter 1: ON HP Fc 80 Hz
+            Filter 2: ON LPQ Fc 12000 Hz Q 0.707
+            Filter 3: ON AP Fc 1000 Hz Q 0.7
+            Filter 4: ON PK Fc 1000 Hz Gain -3 dB Q 1
+            """)
+        expect(r.preset.bands.count == 3, "gain-less filter lines are imported")
+        expect(r.preset.bands[0].type == .highPass && r.preset.bands[0].gain == 0, "HP line without gain")
+        expect(r.preset.bands[1].type == .lowPass && near(r.preset.bands[1].q, 0.707), "LPQ line keeps Q")
+        expect(r.warnings.contains { $0.contains("all-pass") }, "all-pass filter is reported as skipped")
+
         do {
             _ = try PresetImporter.importText("hello world, no EQ here")
             expect(false, "unrecognized input throws")
@@ -220,6 +231,14 @@ enum TestRunner {
 
             let reloaded = PresetStore(directory: dir)
             expect(reloaded.workingPreset(forDevice: "uid-a") == edited, "working preset stash persists to disk")
+
+            let presetsURL = dir.appendingPathComponent("presets.json")
+            try? "{not json".data(using: .utf8)!.write(to: presetsURL)
+            let corrupt = PresetStore(directory: dir)
+            corrupt.save(edited)
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            expect(files.contains { $0.hasPrefix("presets.json.corrupt-") }, "undecodable presets.json is moved aside")
+            expect(corrupt.customPresets == [edited], "store recovers to a fresh presets.json")
         }
     }
 
@@ -262,6 +281,16 @@ enum TestRunner {
         }
         let filteredPeak = filteredSine[2400...].map(abs).max() ?? 0
         expect(abs(filteredPeak - 0.2) < 0.01, "processor applies biquad gain at center frequency")
+
+        let bypassProc = EQProcessor()
+        bypassProc.configure(sampleRate: 48000)
+        bypassProc.update(bands: [EQBand(type: .peak, frequency: 1000, gain: 6, q: 1.41)],
+                          preampDB: -6, outputGainDB: -6.02, limiterEnabled: false, limiterCeilingDB: -1, bypassed: true)
+        var bypassed = [Float](repeating: 1.0, count: 512)
+        bypassed.withUnsafeMutableBufferPointer { buf in
+            bypassProc.process(channels: [buf.baseAddress!], frameCount: 512)
+        }
+        expect(abs(bypassed[100] - 0.5) < 0.01, "bypass keeps output gain but skips preamp and bands")
 
         let limProc = EQProcessor()
         limProc.configure(sampleRate: 48000)

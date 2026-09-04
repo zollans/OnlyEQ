@@ -83,17 +83,23 @@ final class PresetStore: ObservableObject {
     // MARK: - Persistence
 
     private func load() {
-        if let data = try? Data(contentsOf: presetsURL),
-           let presets = try? JSONDecoder().decode([EQPreset].self, from: data) {
-            customPresets = presets
-        }
-        if let data = try? Data(contentsOf: profilesURL),
-           let profiles = try? JSONDecoder().decode([String: DeviceProfile].self, from: data) {
-            deviceProfiles = profiles
-        }
-        if let data = try? Data(contentsOf: workingURL),
-           let working = try? JSONDecoder().decode([String: EQPreset].self, from: data) {
-            workingPresets = working
+        if let presets: [EQPreset] = loadFile(presetsURL) { customPresets = presets }
+        if let profiles: [String: DeviceProfile] = loadFile(profilesURL) { deviceProfiles = profiles }
+        if let working: [String: EQPreset] = loadFile(workingURL) { workingPresets = working }
+    }
+
+    /// A missing file is normal (first launch). A file that exists but does
+    /// not decode is moved aside so the next persist() cannot overwrite it
+    /// with the empty in-memory state.
+    private func loadFile<T: Decodable>(_ url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            let backup = url.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
+            try? FileManager.default.moveItem(at: url, to: backup)
+            Log.write("PresetStore: could not decode \(url.lastPathComponent), moved to \(backup.lastPathComponent): \(error)")
+            return nil
         }
     }
 
