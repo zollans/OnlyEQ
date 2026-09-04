@@ -106,6 +106,7 @@ final class OnlineDatabase: ObservableObject {
     @Published var error: String?
 
     private var cache: [OnlineEntry.Source: [OnlineEntry]] = [:]
+    private var loadGeneration = 0
 
     func load(source: OnlineEntry.Source) async {
         error = nil
@@ -113,16 +114,23 @@ final class OnlineDatabase: ObservableObject {
             entries = cached
             return
         }
+        // Only the most recent load publishes: an older one that finishes
+        // (or is cancelled) after a source switch must not overwrite it.
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
         do {
             let fetched = switch source {
             case .peqdb: try await PeqdbClient.fetchEntries()
             case .autoEq: try await AutoEqClient.fetchEntries()
             }
+            guard generation == loadGeneration else { return }
+            isLoading = false
             cache[source] = fetched
             entries = fetched
         } catch {
+            guard generation == loadGeneration else { return }
+            isLoading = false
             self.error = "Couldn’t load \(source.rawValue): \(error.localizedDescription)"
             entries = []
         }

@@ -164,8 +164,7 @@ struct OnboardingView: View {
         Task {
             defer { isApplying = false }
             if let preset = try? await OnlineDatabase.fetchPreset(for: entry) {
-                state.store.save(preset)
-                finish(apply: preset)
+                finish(apply: state.store.save(preset))
             }
         }
     }

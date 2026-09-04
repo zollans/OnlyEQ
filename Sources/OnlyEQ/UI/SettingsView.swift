@@ -297,11 +297,6 @@ struct AdvancedSettings: View {
     }
 
     private func resetAll() {
-        if let bundleID = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: bundleID)
-        }
-        for preset in state.store.customPresets { state.store.delete(preset) }
-        state.applyFlat()
-        state.userVolumePercent = 100
+        state.resetToDefaults()
     }
 }

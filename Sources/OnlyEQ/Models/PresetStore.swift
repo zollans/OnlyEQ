@@ -40,17 +40,22 @@ final class PresetStore: ObservableObject {
         return allPresets.first { $0.name == name }
     }
 
-    func save(_ preset: EQPreset) {
+    /// Saves the preset and returns the stored value. Saving under an existing
+    /// name replaces that preset and keeps its id, so callers must use the
+    /// returned preset rather than the one they passed in.
+    @discardableResult
+    func save(_ preset: EQPreset) -> EQPreset {
+        var stored = preset
         if let i = customPresets.firstIndex(where: { $0.id == preset.id }) {
             customPresets[i] = preset
         } else if let i = customPresets.firstIndex(where: { $0.name == preset.name }) {
-            var updated = preset
-            updated.id = customPresets[i].id
-            customPresets[i] = updated
+            stored.id = customPresets[i].id
+            customPresets[i] = stored
         } else {
             customPresets.append(preset)
         }
         persist()
+        return stored
     }
 
     func delete(_ preset: EQPreset) {
@@ -59,6 +64,13 @@ final class PresetStore: ObservableObject {
             deviceProfiles[uid]?.presetID = nil
             deviceProfiles[uid]?.presetName = nil
         }
+        persist()
+    }
+
+    func removeAll() {
+        customPresets = []
+        deviceProfiles = [:]
+        workingPresets = [:]
         persist()
     }
 

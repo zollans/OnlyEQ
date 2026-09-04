@@ -489,10 +489,10 @@ struct BandCard: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.tertiary)
             }
-            valueRow("Fc", value: $band.frequency, format: freqFormat, parse: parseFreq)
-            valueRow("Gain", value: $band.gain, format: { String(format: "%.1f dB", $0) },
+            valueRow("Fc", value: $band.frequency, range: 20...20000, format: freqFormat, parse: parseFreq)
+            valueRow("Gain", value: $band.gain, range: -12...12, format: { String(format: "%.1f dB", $0) },
                      parse: { Double($0.replacingOccurrences(of: "dB", with: "").trimmingCharacters(in: .whitespaces)) })
-            valueRow("Q", value: $band.q, format: { String(format: "%.2f", $0) }, parse: { Double($0) })
+            valueRow("Q", value: $band.q, range: 0.1...30, format: { String(format: "%.2f", $0) }, parse: { Double($0) })
         }
         .padding(8)
         .frame(width: 150)
@@ -526,7 +526,9 @@ struct BandCard: View {
         return Double(cleaned).map { $0 * multiplier }
     }
 
-    private func valueRow(_ label: String, value: Binding<Double>,
+    /// Typed values are clamped to the same range the canvas drag allows, so a
+    /// stray "0" cannot put a node at log10(0) or push gain off the graph.
+    private func valueRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
                           format: @escaping (Double) -> String,
                           parse: @escaping (String) -> Double?) -> some View {
         HStack(spacing: 4) {
@@ -535,7 +537,9 @@ struct BandCard: View {
             // "1.5 kHz" edits as "1534", not "1.5" (which would parse as 1.5 Hz).
             EditableValueField(text: format(value.wrappedValue),
                                editText: String(format: "%g", value.wrappedValue)) { input in
-                if let parsed = parse(input) { value.wrappedValue = parsed }
+                if let parsed = parse(input), parsed.isFinite {
+                    value.wrappedValue = min(max(parsed, range.lowerBound), range.upperBound)
+                }
             }
         }
     }

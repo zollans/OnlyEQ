@@ -10,21 +10,21 @@ final class AppShortcutMonitor {
     func start() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if Self.isCloseWindowShortcut(
-                characters: event.charactersIgnoringModifiers,
-                modifiers: event.modifierFlags
-            ) {
+            // Like NSMenu, match the layout's own character first and the
+            // Command-layer Latin fallback second, so Cmd-V works on
+            // Cyrillic, Greek, or Hebrew layouts where the key yields "м".
+            let candidates = [event.charactersIgnoringModifiers, event.characters]
+            let modifiers = event.modifierFlags
+            if candidates.contains(where: { Self.isCloseWindowShortcut(characters: $0, modifiers: modifiers) }) {
                 guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
                       window.styleMask.contains(.closable) else { return event }
                 window.performClose(nil)
                 return nil
             }
 
-            guard let action = Self.editingAction(
-                characters: event.charactersIgnoringModifiers,
-                modifiers: event.modifierFlags
-            ), let responder = NSApp.keyWindow?.firstResponder ?? NSApp.mainWindow?.firstResponder,
-            responder.tryToPerform(action, with: nil) else {
+            guard let action = candidates.lazy.compactMap({ Self.editingAction(characters: $0, modifiers: modifiers) }).first,
+                  let responder = NSApp.keyWindow?.firstResponder ?? NSApp.mainWindow?.firstResponder,
+                  responder.tryToPerform(action, with: nil) else {
                 return event
             }
             return nil

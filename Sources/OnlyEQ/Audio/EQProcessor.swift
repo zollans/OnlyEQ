@@ -9,6 +9,10 @@ import os.lock
 final class EQProcessor {
     struct Snapshot {
         var coefficients: [BiquadCoefficients] = []
+        /// Zeroed filter history for `channelCapacity` channels, allocated on
+        /// the model thread and adopted by the render thread when the band
+        /// count changes, so the realtime path never calls malloc.
+        var freshStates: [BiquadState] = []
         var preampLinear: Float = 1
         var outputGainLinear: Float = 1
         var limiterEnabled = true
@@ -17,12 +21,16 @@ final class EQProcessor {
     }
 
     private var snapshot = Snapshot()
-    private var pendingSnapshot: Snapshot?
+    /// Guarded by `lock`. Holds the next snapshot while `hasPending`, and the
+    /// retired one afterwards so its storage is released by the next update()
+    /// on the model thread rather than freed on the render thread.
+    private var pending = Snapshot()
+    private var hasPending = false
     private var lock = os_unfair_lock()
+    private static let channelCapacity = 8
 
     // Render-thread state (only touched on the audio thread).
     private var states: [BiquadState] = []  // flattened [channel][band]
-    private var stateChannelCount = 0
     private var stateBandCount = 0
     private var limiterEnvelope: Float = 0
     private var limiterAttack = Float(exp(-1.0 / (0.001 * 48000)))
@@ -78,17 +86,26 @@ final class EQProcessor {
         snap.limiterEnabled = limiterEnabled
         snap.limiterCeilingLinear = Float(pow(10, limiterCeilingDB / 20))
         snap.bypassed = bypassed
+        snap.freshStates = Array(repeating: BiquadState(), count: Self.channelCapacity * snap.coefficients.count)
         os_unfair_lock_lock(&lock)
-        pendingSnapshot = snap
+        pending = snap
+        hasPending = true
         os_unfair_lock_unlock(&lock)
     }
 
     /// Process non-interleaved Float32 channel buffers in place. Audio thread only.
     func process(channels: [UnsafeMutablePointer<Float>], frameCount: Int) {
         if os_unfair_lock_trylock(&lock) {
-            if let pending = pendingSnapshot {
-                snapshot = pending
-                pendingSnapshot = nil
+            if hasPending {
+                swap(&snapshot, &pending)
+                hasPending = false
+                if snapshot.coefficients.count != stateBandCount {
+                    // Adopt the preallocated history; the old one retires
+                    // with the previous snapshot.
+                    swap(&states, &snapshot.freshStates)
+                    stateBandCount = snapshot.coefficients.count
+                    limiterEnvelope = 0
+                }
             }
             os_unfair_lock_unlock(&lock)
         }
@@ -99,14 +116,11 @@ final class EQProcessor {
         let applyEQ = !snap.bypassed
         let preampLinear: Float = applyEQ ? snap.preampLinear : 1
 
-        // (Re)size filter state to match topology.
         let channelCount = channels.count
         let bandCount = snap.coefficients.count
-        if stateChannelCount != channelCount || stateBandCount != bandCount {
+        if states.count < channelCount * bandCount {
+            // More channels than `channelCapacity`: allocate as a last resort.
             states = Array(repeating: BiquadState(), count: channelCount * bandCount)
-            stateChannelCount = channelCount
-            stateBandCount = bandCount
-            limiterEnvelope = 0
         }
 
         let meteringActive = meter.withLockIfAvailable { $0.isActive } ?? false
