@@ -27,6 +27,7 @@ enum TestRunner {
     static func run() -> Int32 {
         do {
             try importerTests()
+            try exporterTests()
             textEditingShortcutTests()
             dspTests()
             watchdogTests()
@@ -151,6 +152,53 @@ enum TestRunner {
         let data = try JSONEncoder().encode(original)
         r = try PresetImporter.importData(data)
         expect(r.detectedFormat == "OnlyEQ preset" && r.preset == original, "native round trip")
+    }
+
+    private static func exporterTests() throws {
+        let fixtureText = String(decoding: try fixture("autoeq_parametric.txt"), as: UTF8.self)
+        let exported = PresetExporter.parametricText(try PresetImporter.importData(fixture("autoeq_parametric.txt")).preset)
+        expect(exported.trimmingCharacters(in: .whitespacesAndNewlines)
+               == fixtureText.trimmingCharacters(in: .whitespacesAndNewlines), "exporter matches autoeq fixture")
+        expect(exported.hasPrefix("Preamp: "), "exporter preamp first")
+        expect(exported.components(separatedBy: "\n")[1].hasPrefix("Filter 1: ON"), "exporter filter 1 second")
+
+        let allTypes = EQPreset(name: "Types", bands: FilterType.allCases.enumerated().map { i, type in
+            EQBand(type: type, frequency: 1000 + Double(i), gain: 1.5, q: 0.9)
+        })
+        var r = try PresetImporter.importText(PresetExporter.parametricText(allTypes))
+        expect(r.preset.bands.count == FilterType.allCases.count, "exporter all types count")
+        expect(r.preset.bands.map(\.type) == FilterType.allCases, "exporter all types round trip")
+
+        let precise = EQPreset(name: "Precise", preampDB: -3.35, bands: [
+            EQBand(type: .peak, frequency: 22.2, gain: 1.24, q: 1.414),
+        ])
+        r = try PresetImporter.importText(PresetExporter.parametricText(precise))
+        expect(r.preset.preampDB == -3.35, "exporter preamp precision")
+        if let b = r.preset.bands.first {
+            expect(b.frequency == 22.2 && b.gain == 1.24 && b.q == 1.414, "exporter band precision")
+        } else { expect(false, "exporter band precision") }
+
+        let disabled = EQPreset(name: "Off", bands: [
+            EQBand(type: .peak, frequency: 3000, gain: -2, q: 2, isEnabled: false),
+        ])
+        let disabledText = PresetExporter.parametricText(disabled)
+        expect(disabledText.contains("OFF PK"), "exporter OFF band")
+        r = try PresetImporter.importText(disabledText)
+        expect(r.preset.bands.first?.isEnabled == false, "exporter OFF band round trip")
+
+        let json = EQPreset(name: "JSON", preampDB: -4.25, bands: [
+            EQBand(type: .lowShelf, frequency: 105, gain: 6.4, q: 0.7),
+            EQBand(type: .peak, frequency: 3000, gain: -2, q: 2, isEnabled: false),
+        ], source: "Test")
+        r = try PresetImporter.importData(try PresetExporter.json(json))
+        expect(r.detectedFormat == "OnlyEQ preset", "exporter json format")
+        expect(r.preset.id != json.id, "exporter json fresh id")
+        expect(r.preset.name == json.name && r.preset.preampDB == json.preampDB && r.preset.bands == json.bands
+               && r.preset.source == json.source, "exporter json round trip")
+        expect(r.preset.bands.dropFirst().first?.isEnabled == false, "exporter json OFF band")
+
+        expect(PresetExporter.parametricText(EQPreset(name: "Fc", bands: [EQBand(frequency: 22.123)])).contains("Fc 22.12 Hz"),
+               "exporter Fc avoids APO thousands rule")
     }
 
     private static func storeTests() {
