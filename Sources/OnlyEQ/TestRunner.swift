@@ -192,8 +192,13 @@ enum TestRunner {
         ], source: "Test")
         r = try PresetImporter.importData(try PresetExporter.json(json))
         expect(r.detectedFormat == "OnlyEQ preset", "exporter json format")
-        expect(r.preset == json, "exporter json round trip")
+        expect(r.preset.id != json.id, "exporter json fresh id")
+        expect(r.preset.name == json.name && r.preset.preampDB == json.preampDB && r.preset.bands == json.bands
+               && r.preset.source == json.source, "exporter json round trip")
         expect(r.preset.bands.dropFirst().first?.isEnabled == false, "exporter json OFF band")
+
+        expect(PresetExporter.parametricText(EQPreset(name: "Fc", bands: [EQBand(frequency: 22.123)])).contains("Fc 22.12 Hz"),
+               "exporter Fc avoids APO thousands rule")
     }
 
     private static func storeTests() {

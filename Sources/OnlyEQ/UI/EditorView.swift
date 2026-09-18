@@ -200,15 +200,17 @@ struct EditorView: View {
     private enum ExportFormat { case text, json }
 
     private func exportPreset(_ format: ExportFormat) {
+        var preset = state.preset
+        if format == .text { preset.preampDB = state.effectivePreampDB }
         let panel = NSSavePanel()
         panel.allowedContentTypes = format == .text ? [.plainText] : [.json]
-        panel.nameFieldStringValue = state.preset.name + (format == .text ? ".txt" : ".json")
+        panel.nameFieldStringValue = preset.name + (format == .text ? ".txt" : ".json")
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             switch format {
-            case .text: try PresetExporter.parametricText(state.preset).write(to: url, atomically: true, encoding: .utf8)
-            case .json: try PresetExporter.json(state.preset).write(to: url, options: .atomic)
+            case .text: try PresetExporter.parametricText(preset).write(to: url, atomically: true, encoding: .utf8)
+            case .json: try PresetExporter.json(preset).write(to: url, options: .atomic)
             }
         } catch {
             NSAlert(error: error).runModal()
