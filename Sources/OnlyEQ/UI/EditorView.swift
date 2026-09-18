@@ -99,6 +99,12 @@ struct EditorView: View {
                 Label("Import…", systemImage: "square.and.arrow.down")
             }
 
+            Button {
+                exportPreset()
+            } label: {
+                Label("Export…", systemImage: "square.and.arrow.up")
+            }
+
             Menu {
                 ForEach(state.devices) { device in
                     Button(device.name) { state.selectOutputDevice(device) }
@@ -187,6 +193,19 @@ struct EditorView: View {
             .padding(.vertical, 8)
         }
         .frame(height: 122)
+    }
+
+    private func exportPreset() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = state.preset.name + ".txt"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try PresetExporter.parametricText(state.preset).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     private func bandBinding(_ id: UUID) -> Binding<EQBand> {
