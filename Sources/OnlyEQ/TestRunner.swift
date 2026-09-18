@@ -174,8 +174,9 @@ enum TestRunner {
         ])
         r = try PresetImporter.importText(PresetExporter.parametricText(precise))
         expect(r.preset.preampDB == -3.35, "exporter preamp precision")
-        expect(r.preset.bands[0].frequency == 22.2 && r.preset.bands[0].gain == 1.24 && r.preset.bands[0].q == 1.414,
-               "exporter band precision")
+        if let b = r.preset.bands.first {
+            expect(b.frequency == 22.2 && b.gain == 1.24 && b.q == 1.414, "exporter band precision")
+        } else { expect(false, "exporter band precision") }
 
         let disabled = EQPreset(name: "Off", bands: [
             EQBand(type: .peak, frequency: 3000, gain: -2, q: 2, isEnabled: false),
@@ -183,7 +184,16 @@ enum TestRunner {
         let disabledText = PresetExporter.parametricText(disabled)
         expect(disabledText.contains("OFF PK"), "exporter OFF band")
         r = try PresetImporter.importText(disabledText)
-        expect(r.preset.bands[0].isEnabled == false, "exporter OFF band round trip")
+        expect(r.preset.bands.first?.isEnabled == false, "exporter OFF band round trip")
+
+        let json = EQPreset(name: "JSON", preampDB: -4.25, bands: [
+            EQBand(type: .lowShelf, frequency: 105, gain: 6.4, q: 0.7),
+            EQBand(type: .peak, frequency: 3000, gain: -2, q: 2, isEnabled: false),
+        ], source: "Test")
+        r = try PresetImporter.importData(try PresetExporter.json(json))
+        expect(r.detectedFormat == "OnlyEQ preset", "exporter json format")
+        expect(r.preset == json, "exporter json round trip")
+        expect(r.preset.bands.dropFirst().first?.isEnabled == false, "exporter json OFF band")
     }
 
     private static func storeTests() {

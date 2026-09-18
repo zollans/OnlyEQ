@@ -1,8 +1,8 @@
 import Foundation
 
-/// Serializes a preset as Equalizer APO / AutoEq parametric text, the inverse
-/// of `PresetImporter.parseParametricText`. Gain and Q are always written so
-/// the output re-imports unchanged.
+/// Serializes a preset as Equalizer APO / AutoEq parametric text (Gain and Q on
+/// every line so `PresetImporter` can re-import it; values are rounded to 4
+/// decimals and `OFF … 0 dB` lines re-import as padding) or as lossless JSON.
 enum PresetExporter {
 
     private static let formatter: NumberFormatter = {
@@ -22,6 +22,12 @@ enum PresetExporter {
                          + "Gain \(format(band.gain, minimumFractionDigits: 1)) dB Q \(format(band.q, minimumFractionDigits: 2))")
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    static func json(_ preset: EQPreset) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(preset)
     }
 
     private static func token(for type: FilterType) -> String {

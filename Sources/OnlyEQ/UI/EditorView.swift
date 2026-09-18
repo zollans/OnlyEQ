@@ -99,11 +99,13 @@ struct EditorView: View {
                 Label("Import…", systemImage: "square.and.arrow.down")
             }
 
-            Button {
-                exportPreset()
+            Menu {
+                Button("Equalizer APO / AutoEq text…") { exportPreset(.text) }
+                Button("OnlyEQ preset JSON…") { exportPreset(.json) }
             } label: {
                 Label("Export…", systemImage: "square.and.arrow.up")
             }
+            .disabled(state.preset.bands.isEmpty)
 
             Menu {
                 ForEach(state.devices) { device in
@@ -195,14 +197,19 @@ struct EditorView: View {
         .frame(height: 122)
     }
 
-    private func exportPreset() {
+    private enum ExportFormat { case text, json }
+
+    private func exportPreset(_ format: ExportFormat) {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = state.preset.name + ".txt"
+        panel.allowedContentTypes = format == .text ? [.plainText] : [.json]
+        panel.nameFieldStringValue = state.preset.name + (format == .text ? ".txt" : ".json")
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try PresetExporter.parametricText(state.preset).write(to: url, atomically: true, encoding: .utf8)
+            switch format {
+            case .text: try PresetExporter.parametricText(state.preset).write(to: url, atomically: true, encoding: .utf8)
+            case .json: try PresetExporter.json(state.preset).write(to: url, options: .atomic)
+            }
         } catch {
             NSAlert(error: error).runModal()
         }
