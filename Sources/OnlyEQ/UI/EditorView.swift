@@ -100,6 +100,14 @@ struct EditorView: View {
             }
 
             Menu {
+                Button("Equalizer APO / AutoEq text…") { exportPreset(.text) }
+                Button("OnlyEQ preset JSON…") { exportPreset(.json) }
+            } label: {
+                Label("Export…", systemImage: "square.and.arrow.up")
+            }
+            .disabled(state.preset.bands.isEmpty)
+
+            Menu {
                 ForEach(state.devices) { device in
                     Button(device.name) { state.selectOutputDevice(device) }
                 }
@@ -187,6 +195,26 @@ struct EditorView: View {
             .padding(.vertical, 8)
         }
         .frame(height: 122)
+    }
+
+    private enum ExportFormat { case text, json }
+
+    private func exportPreset(_ format: ExportFormat) {
+        var preset = state.preset
+        if format == .text { preset.preampDB = state.effectivePreampDB }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = format == .text ? [.plainText] : [.json]
+        panel.nameFieldStringValue = preset.name + (format == .text ? ".txt" : ".json")
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            switch format {
+            case .text: try PresetExporter.parametricText(preset).write(to: url, atomically: true, encoding: .utf8)
+            case .json: try PresetExporter.json(preset).write(to: url, options: .atomic)
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     private func bandBinding(_ id: UUID) -> Binding<EQBand> {
