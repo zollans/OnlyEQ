@@ -14,6 +14,8 @@ struct EditorView: View {
 
     var initialImportRequested = false
     var initialProfileSuggestion: ProfileSuggestion?
+    /// Band to select when the editor opens (used by `--screenshots`).
+    var initialSelectedBandID: UUID?
 
     @EnvironmentObject var state: AppState
     @State private var selectedBandID: UUID?
@@ -39,6 +41,7 @@ struct EditorView: View {
             importPresentation = ImportPresentation(profileSuggestion: suggestion)
         }
         .onAppear {
+            if selectedBandID == nil { selectedBandID = initialSelectedBandID }
             guard initialImportRequested, !handledInitialImport else { return }
             handledInitialImport = true
             importPresentation = ImportPresentation(profileSuggestion: initialProfileSuggestion)
@@ -156,6 +159,9 @@ struct EditorView: View {
             .overlay(alignment: .bottomLeading) {
                 Text("−12 dB").font(.system(size: 9)).foregroundStyle(.secondary).padding(4)
             }
+            .overlay(alignment: .top) {
+                if state.preset.isChannelSplit { channelLegend }
+            }
             .overlay(alignment: .topTrailing) {
                 Label("Double-click graph to add band", systemImage: "plus.circle")
                     .font(.system(size: 10)).foregroundStyle(.tertiary).padding(4)
@@ -164,6 +170,21 @@ struct EditorView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 6)
+    }
+
+    private var channelLegend: some View {
+        HStack(spacing: 12) {
+            ForEach([BandChannel.both, .left, .right]) { channel in
+                HStack(spacing: 5) {
+                    Capsule().fill(ChannelPalette.color(channel)).frame(width: 14, height: 3)
+                    Text(channel.displayName)
+                }
+            }
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(.secondary)
+        .padding(4)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Band strip
@@ -194,6 +215,14 @@ struct EditorView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 8)
         }
+        // Fade the strip into the margins so overflowing cards read as
+        // scrollable rather than clipped.
+        .mask(
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0), .init(color: .black, location: 0.025),
+                .init(color: .black, location: 0.975), .init(color: .clear, location: 1),
+            ], startPoint: .leading, endPoint: .trailing)
+        )
         .frame(height: 122)
     }
 
@@ -481,6 +510,7 @@ struct BandCard: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 Spacer(minLength: 0)
+                ChannelToggles(channel: $band.channel)
                 Button {
                     onDelete()
                 } label: {
@@ -495,7 +525,7 @@ struct BandCard: View {
             valueRow("Q", value: $band.q, range: 0.1...30, format: { String(format: "%.2f", $0) }, parse: { Double($0) })
         }
         .padding(8)
-        .frame(width: 150)
+        .frame(width: 164)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -575,5 +605,45 @@ struct EditableValueField: View {
                     editing = true
                 }
         }
+    }
+}
+
+/// Two tiny L/R switches: which channels a band filters. Both lit is the
+/// default; turning one off makes the band one-sided. The last lit side
+/// cannot be turned off.
+struct ChannelToggles: View {
+    @Binding var channel: BandChannel
+
+    var body: some View {
+        HStack(spacing: 1) {
+            side("L", index: 0, only: .left, other: .right)
+            side("R", index: 1, only: .right, other: .left)
+        }
+        .padding(1)
+        .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5)))
+    }
+
+    private func side(_ label: String, index: Int, only: BandChannel, other: BandChannel) -> some View {
+        let isOn = channel.applies(toChannel: index)
+        return Button {
+            switch channel {
+            case .both: channel = other
+            case only: break
+            default: channel = .both
+            }
+        } label: {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 14, height: 14)
+                .foregroundStyle(isOn ? (channel == .both ? Color.primary : ChannelPalette.color(only)) : Color.secondary.opacity(0.5))
+                .background(RoundedRectangle(cornerRadius: 3).fill(isOn && channel != .both ? ChannelPalette.color(only).opacity(0.22) : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(!isOn ? "Also filter the \(only.displayName.lowercased()) channel"
+              : channel == .both ? "Stop filtering the \(only.displayName.lowercased()) channel"
+              : "Filters the \(only.displayName.lowercased()) channel only")
+        .accessibilityLabel("\(only.displayName) channel")
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }

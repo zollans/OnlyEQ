@@ -103,9 +103,12 @@ struct BiquadState {
 }
 
 enum EQResponse {
-    /// Combined magnitude response (dB) of enabled bands + preamp over the given frequencies.
-    static func curve(bands: [EQBand], preampDB: Double, frequencies: [Double], sampleRate: Double = 48000) -> [Double] {
-        let coeffs = bands.filter(\.isEnabled).map {
+    /// Combined magnitude response (dB) of enabled bands + preamp over the given
+    /// frequencies. With `channel` set, only bands that apply to that channel
+    /// index count; without it, every band does.
+    static func curve(bands: [EQBand], preampDB: Double, frequencies: [Double], sampleRate: Double = 48000,
+                      channel: Int? = nil) -> [Double] {
+        let coeffs = bands.filter { $0.isEnabled && (channel.map($0.channel.applies(toChannel:)) ?? true) }.map {
             BiquadCoefficients.make(type: $0.type, frequency: $0.frequency, gainDB: $0.gain, q: $0.q, sampleRate: sampleRate)
         }
         return frequencies.map { f in
@@ -119,9 +122,14 @@ enum EQResponse {
         return (0..<count).map { pow(10, lo + (hi - lo) * Double($0) / Double(count - 1)) }
     }
 
-    /// Preamp (≤ 0) that keeps the combined response from exceeding 0 dB.
+    /// Preamp (≤ 0) that keeps the combined response from exceeding 0 dB. The
+    /// preamp is shared, so a split preset uses the louder of its two channels.
     static func autoPreamp(bands: [EQBand], sampleRate: Double = 48000) -> Double {
-        let peak = curve(bands: bands, preampDB: 0, frequencies: logGrid(count: 512), sampleRate: sampleRate).max() ?? 0
+        let grid = logGrid(count: 512)
+        let channels: [Int?] = bands.contains { $0.channel != .both } ? [0, 1] : [nil]
+        let peak = channels.compactMap {
+            curve(bands: bands, preampDB: 0, frequencies: grid, sampleRate: sampleRate, channel: $0).max()
+        }.max() ?? 0
         return peak > 0 ? -(peak * 100).rounded(.up) / 100 : 0
     }
 }

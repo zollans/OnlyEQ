@@ -18,6 +18,32 @@ enum FilterType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Which output channel a band filters. `both` is the default and is what every
+/// preset used before per-channel EQ, so it is omitted from saved JSON.
+enum BandChannel: String, Codable, CaseIterable, Identifiable {
+    case both, left, right
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .both: "Both"
+        case .left: "Left"
+        case .right: "Right"
+        }
+    }
+
+    /// Channel index 0 is left and 1 is right; any further channels only get
+    /// bands that apply to both.
+    func applies(toChannel index: Int) -> Bool {
+        switch self {
+        case .both: true
+        case .left: index == 0
+        case .right: index == 1
+        }
+    }
+}
+
 struct EQBand: Identifiable, Codable, Equatable, Hashable {
     var id = UUID()
     var type: FilterType = .peak
@@ -25,15 +51,18 @@ struct EQBand: Identifiable, Codable, Equatable, Hashable {
     var gain: Double = 0
     var q: Double = 1.41
     var isEnabled = true
+    var channel: BandChannel = .both
 
-    private enum CodingKeys: String, CodingKey { case type, frequency, gain, q, isEnabled }
+    private enum CodingKeys: String, CodingKey { case type, frequency, gain, q, isEnabled, channel }
 
-    init(type: FilterType = .peak, frequency: Double = 1000, gain: Double = 0, q: Double = 1.41, isEnabled: Bool = true) {
+    init(type: FilterType = .peak, frequency: Double = 1000, gain: Double = 0, q: Double = 1.41,
+         isEnabled: Bool = true, channel: BandChannel = .both) {
         self.type = type
         self.frequency = frequency
         self.gain = gain
         self.q = q
         self.isEnabled = isEnabled
+        self.channel = channel
     }
 
     init(from decoder: Decoder) throws {
@@ -43,13 +72,24 @@ struct EQBand: Identifiable, Codable, Equatable, Hashable {
         gain = try c.decodeIfPresent(Double.self, forKey: .gain) ?? 0
         q = try c.decodeIfPresent(Double.self, forKey: .q) ?? 1.41
         isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        channel = try c.decodeIfPresent(BandChannel.self, forKey: .channel) ?? .both
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(frequency, forKey: .frequency)
+        try c.encode(gain, forKey: .gain)
+        try c.encode(q, forKey: .q)
+        try c.encode(isEnabled, forKey: .isEnabled)
+        if channel != .both { try c.encode(channel, forKey: .channel) }
     }
 
     // `id` is a runtime identity for SwiftUI, not part of the value — it isn't
     // encoded, so equality/hashing must ignore it too.
     static func == (lhs: EQBand, rhs: EQBand) -> Bool {
         lhs.type == rhs.type && lhs.frequency == rhs.frequency && lhs.gain == rhs.gain
-            && lhs.q == rhs.q && lhs.isEnabled == rhs.isEnabled
+            && lhs.q == rhs.q && lhs.isEnabled == rhs.isEnabled && lhs.channel == rhs.channel
     }
 
     func hash(into hasher: inout Hasher) {
@@ -58,6 +98,7 @@ struct EQBand: Identifiable, Codable, Equatable, Hashable {
         hasher.combine(gain)
         hasher.combine(q)
         hasher.combine(isEnabled)
+        hasher.combine(channel)
     }
 }
 
@@ -92,6 +133,9 @@ struct EQPreset: Identifiable, Codable, Equatable {
     ]
 
     var isFlat: Bool { bands.allSatisfy { $0.gain == 0 } && preampDB == 0 }
+
+    /// True when any band filters only the left or only the right channel.
+    var isChannelSplit: Bool { bands.contains { $0.channel != .both } }
 }
 
 /// Preset + volume remembered per output device.

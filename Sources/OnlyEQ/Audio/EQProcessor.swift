@@ -9,6 +9,14 @@ import os.lock
 final class EQProcessor {
     struct Snapshot {
         var coefficients: [BiquadCoefficients] = []
+        /// Each channel's filters as a range of `coefficients`: left, right,
+        /// and any further channels. All three share one range unless the
+        /// preset has left- or right-only bands.
+        var leftRange = 0..<0
+        var rightRange = 0..<0
+        var otherRange = 0..<0
+        /// Filter history slots per channel: the longest of the three ranges.
+        var stride = 0
         /// Zeroed filter history for `channelCapacity` channels, allocated on
         /// the model thread and adopted by the render thread when the band
         /// count changes, so the realtime path never calls malloc.
@@ -31,7 +39,7 @@ final class EQProcessor {
 
     // Render-thread state (only touched on the audio thread).
     private var states: [BiquadState] = []  // flattened [channel][band]
-    private var stateBandCount = 0
+    private var stateStride = 0
     private var limiterEnvelope: Float = 0
     private var limiterAttack = Float(exp(-1.0 / (0.001 * 48000)))
     private var limiterRelease = Float(exp(-1.0 / (0.080 * 48000)))
@@ -78,15 +86,34 @@ final class EQProcessor {
     func update(bands: [EQBand], preampDB: Double, outputGainDB: Double = 0,
                 limiterEnabled: Bool, limiterCeilingDB: Double, bypassed: Bool) {
         var snap = Snapshot()
-        snap.coefficients = bands.filter(\.isEnabled).map {
-            BiquadCoefficients.make(type: $0.type, frequency: $0.frequency, gainDB: $0.gain, q: $0.q, sampleRate: sampleRate)
+        let enabled = bands.filter(\.isEnabled)
+        let make = { (list: [EQBand]) in
+            list.map {
+                BiquadCoefficients.make(type: $0.type, frequency: $0.frequency, gainDB: $0.gain, q: $0.q, sampleRate: self.sampleRate)
+            }
+        }
+        if enabled.contains(where: { $0.channel != .both }) {
+            let left = make(enabled.filter { $0.channel.applies(toChannel: 0) })
+            let right = make(enabled.filter { $0.channel.applies(toChannel: 1) })
+            let other = make(enabled.filter { $0.channel == .both })
+            snap.coefficients = left + right + other
+            snap.leftRange = 0..<left.count
+            snap.rightRange = left.count..<(left.count + right.count)
+            snap.otherRange = (left.count + right.count)..<snap.coefficients.count
+            snap.stride = max(left.count, right.count)
+        } else {
+            snap.coefficients = make(enabled)
+            snap.leftRange = 0..<snap.coefficients.count
+            snap.rightRange = snap.leftRange
+            snap.otherRange = snap.leftRange
+            snap.stride = snap.coefficients.count
         }
         snap.preampLinear = Float(pow(10, preampDB / 20))
         snap.outputGainLinear = Float(pow(10, outputGainDB / 20))
         snap.limiterEnabled = limiterEnabled
         snap.limiterCeilingLinear = Float(pow(10, limiterCeilingDB / 20))
         snap.bypassed = bypassed
-        snap.freshStates = Array(repeating: BiquadState(), count: Self.channelCapacity * snap.coefficients.count)
+        snap.freshStates = Array(repeating: BiquadState(), count: Self.channelCapacity * snap.stride)
         os_unfair_lock_lock(&lock)
         pending = snap
         hasPending = true
@@ -99,11 +126,11 @@ final class EQProcessor {
             if hasPending {
                 swap(&snapshot, &pending)
                 hasPending = false
-                if snapshot.coefficients.count != stateBandCount {
+                if snapshot.stride != stateStride {
                     // Adopt the preallocated history; the old one retires
                     // with the previous snapshot.
                     swap(&states, &snapshot.freshStates)
-                    stateBandCount = snapshot.coefficients.count
+                    stateStride = snapshot.stride
                     limiterEnvelope = 0
                 }
             }
@@ -117,10 +144,10 @@ final class EQProcessor {
         let preampLinear: Float = applyEQ ? snap.preampLinear : 1
 
         let channelCount = channels.count
-        let bandCount = snap.coefficients.count
-        if states.count < channelCount * bandCount {
+        let stride = snap.stride
+        if states.count < channelCount * stride {
             // More channels than `channelCapacity`: allocate as a last resort.
-            states = Array(repeating: BiquadState(), count: channelCount * bandCount)
+            states = Array(repeating: BiquadState(), count: channelCount * stride)
         }
 
         let meteringActive = meter.withLockIfAvailable { $0.isActive } ?? false
@@ -139,10 +166,12 @@ final class EQProcessor {
                         var maxMag: Float = 0
                         for ch in 0..<channelCount {
                             var sample = channelBuffers[ch][frame] * preampLinear
-                            if applyEQ, bandCount > 0, let stateBase, let coefficientBase {
-                                let channelStates = stateBase + ch * bandCount
-                                for band in 0..<bandCount {
-                                    sample = channelStates[band].process(sample, coefficientBase[band])
+                            let range = ch == 0 ? snap.leftRange : ch == 1 ? snap.rightRange : snap.otherRange
+                            if applyEQ, !range.isEmpty, let stateBase, let coefficientBase {
+                                let channelStates = stateBase + ch * stride
+                                let channelCoefficients = coefficientBase + range.lowerBound
+                                for band in 0..<range.count {
+                                    sample = channelStates[band].process(sample, channelCoefficients[band])
                                 }
                             }
                             sample *= snap.outputGainLinear
