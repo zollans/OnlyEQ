@@ -14,7 +14,19 @@ Every Mac EQ I tried either made me install BlackHole or a HAL driver, charged f
 curl -fsSL https://raw.githubusercontent.com/zollans/OnlyEQ/main/scripts/install.sh | bash
 ```
 
-The app isn't notarized (there's no paid developer account behind this), so the script clears the quarantine flag after downloading — [read it first](scripts/install.sh) if that concerns you. Or build from source, it takes about a minute and only needs the Xcode Command Line Tools:
+The app isn't notarized (there's no paid developer account behind this), so the script clears the quarantine flag after downloading — [read it first](scripts/install.sh) if that concerns you.
+
+With [Homebrew](https://brew.sh):
+
+```sh
+brew tap zollans/tap
+brew trust --cask zollans/tap/onlyeq
+brew install --cask onlyeq
+```
+
+Homebrew asks you to trust casks from taps outside its official ones; `brew trust` covers only the OnlyEQ cask. Homebrew keeps the quarantine flag, so on first launch open System Settings → Privacy & Security and click **Open Anyway**.
+
+Or build from source, it takes about a minute and only needs the Xcode Command Line Tools:
 
 ```sh
 git clone https://github.com/zollans/OnlyEQ && cd OnlyEQ

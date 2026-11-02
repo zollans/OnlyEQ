@@ -11,6 +11,7 @@ For each release:
 3. Run `./scripts/prepare-release.sh VERSION`.
 4. Commit the source changes and generated `appcast-v2.xml`, merge them to `main`, and tag the merged commit as `vVERSION`.
 5. Publish `build/OnlyEQ.app.zip` and `appcast-v2.xml` as release assets, using the versioned release-notes file as the GitHub release notes.
+6. Run `./scripts/bump-cask.sh VERSION` to point the Homebrew cask in [zollans/homebrew-tap](https://github.com/zollans/homebrew-tap) at the new release. It takes the checksum from GitHub's digest of the uploaded zip, so run it only after the release is published.
 
 Example publishing command after the release commit is on `main`:
 
