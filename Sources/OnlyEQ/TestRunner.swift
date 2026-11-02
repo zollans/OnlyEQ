@@ -28,6 +28,7 @@ enum TestRunner {
         do {
             try importerTests()
             try exporterTests()
+            try channelTests()
             textEditingShortcutTests()
             dspTests()
             watchdogTests()
@@ -163,6 +164,76 @@ enum TestRunner {
         let data = try JSONEncoder().encode(original)
         r = try PresetImporter.importData(data)
         expect(r.detectedFormat == "OnlyEQ preset" && r.preset == original, "native round trip")
+    }
+
+    private static func channelTests() throws {
+        // Model: `both` stays out of saved JSON; old JSON decodes as both.
+        let plain = try JSONEncoder().encode(EQBand(frequency: 500))
+        expect(!String(decoding: plain, as: UTF8.self).contains("channel"), "both channel is not encoded")
+        let old = try JSONDecoder().decode(EQBand.self, from: Data(#"{"frequency":500}"#.utf8))
+        expect(old.channel == .both, "band without channel decodes as both")
+        let leftBand = EQBand(frequency: 500, channel: .left)
+        expect(try JSONDecoder().decode(EQBand.self, from: JSONEncoder().encode(leftBand)) == leftBand,
+               "left channel round trips through JSON")
+        expect(EQBand(channel: .left) != EQBand(channel: .right), "channel is part of band equality")
+
+        // Import: APO Channel blocks, aliases, unknown channels, additive preamps.
+        var r = try PresetImporter.importText("""
+            Preamp: -3 dB
+            Filter 1: ON PK Fc 100 Hz Gain 2 dB Q 1
+            Channel: L
+            Preamp: -1 dB
+            Filter 2: ON PK Fc 1000 Hz Gain -2 dB Q 1
+            Channel: 2
+            Filter 3: ON PK Fc 2000 Hz Gain 1 dB Q 1
+            Channel: C
+            Filter 4: ON PK Fc 3000 Hz Gain 1 dB Q 1
+            Channel: L R
+            Filter 5: ON PK Fc 4000 Hz Gain 1 dB Q 1
+            Channel: all
+            Filter 6: ON PK Fc 5000 Hz Gain 1 dB Q 1
+            """)
+        expect(r.preset.bands.map(\.channel) == [.both, .left, .right, .both, .both], "APO channel blocks import")
+        expect(r.warnings.contains { $0.contains("other than left and right") }, "unknown channel filters skipped")
+        expect(r.preset.preampDB == -4, "channel preamps add to the global preamp; lower channel wins")
+        expect(r.warnings.contains { $0.contains("different preamps") }, "differing channel preamps warn")
+        expect(PresetImporter.bandChannel(fromChannelList: "SUB") == nil, "SUB is not a band channel")
+
+        // Export: Channel lines only when split, and the split survives a round trip.
+        let split = EQPreset(name: "Split", preampDB: -2, bands: [
+            EQBand(type: .peak, frequency: 100, gain: 2, q: 1),
+            EQBand(type: .peak, frequency: 1000, gain: -2, q: 1, channel: .left),
+            EQBand(type: .peak, frequency: 2000, gain: 1, q: 1, channel: .right),
+            EQBand(type: .peak, frequency: 4000, gain: 1, q: 1),
+        ])
+        let text = PresetExporter.parametricText(split)
+        expect(text.contains("Channel: L\n") && text.contains("Channel: R\n") && text.contains("Channel: all\n"),
+               "split export writes APO channel lines")
+        r = try PresetImporter.importText(text)
+        expect(r.preset.bands == split.bands && r.preset.preampDB == -2, "split preset round trips through text")
+        expect(!PresetExporter.parametricText(EQPreset(name: "Plain", bands: [EQBand()])).contains("Channel"),
+               "unsplit export has no channel lines")
+
+        // Response: auto preamp covers the louder channel.
+        expect(near(EQResponse.autoPreamp(bands: [
+            EQBand(type: .peak, frequency: 1000, gain: 3, q: 1.41, channel: .left),
+            EQBand(type: .peak, frequency: 1000, gain: 5, q: 1.41, channel: .right),
+        ]), -5, 0.1), "auto preamp uses the louder channel")
+
+        // DSP: a left-only +6 dB peak doubles the left channel and leaves the right alone.
+        let proc = EQProcessor()
+        proc.configure(sampleRate: 48000)
+        proc.update(bands: [EQBand(type: .peak, frequency: 1000, gain: 6, q: 1.41, channel: .left)],
+                    preampDB: 0, limiterEnabled: false, limiterCeilingDB: -1, bypassed: false)
+        var left = (0..<4800).map { Float(0.1 * sin(Double($0) * 2 * .pi * 1000 / 48000)) }
+        var right = left
+        left.withUnsafeMutableBufferPointer { l in
+            right.withUnsafeMutableBufferPointer { r in
+                proc.process(channels: [l.baseAddress!, r.baseAddress!], frameCount: l.count)
+            }
+        }
+        expect(abs((left[2400...].map(abs).max() ?? 0) - 0.2) < 0.01, "left-only band filters the left channel")
+        expect(abs((right[2400...].map(abs).max() ?? 0) - 0.1) < 0.001, "left-only band leaves the right channel")
     }
 
     private static func exporterTests() throws {

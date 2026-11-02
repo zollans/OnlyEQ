@@ -36,12 +36,26 @@ enum ScreenshotRenderer {
             to: dir.appendingPathComponent("editor.png")
         ) ? 0 : 1
 
+        // The same preset with one-sided bands, as a measurement-mic user
+        // would add them on top of a headphone correction.
+        let unsplit = state.preset
+        state.preset.bands.insert(contentsOf: [
+            EQBand(type: .peak, frequency: 2400, gain: -3.5, q: 2.5, channel: .left),
+            EQBand(type: .peak, frequency: 6500, gain: 3.0, q: 3.0, channel: .right),
+        ], at: 1)
+        failures += capture(
+            canvas(windowChrome(EditorView(initialSelectedBandID: state.preset.bands[1].id)
+                .environmentObject(state).frame(width: 1080, height: 560), width: 1080), panelRadius: 12),
+            to: dir.appendingPathComponent("editor-channels.png")
+        ) ? 0 : 1
+        state.preset = unsplit
+
         failures += capture(
             canvas(windowChrome(ImportSheet().environmentObject(state), width: 560), panelRadius: 12),
             to: dir.appendingPathComponent("import.png")
         ) ? 0 : 1
 
-        print(failures == 0 ? "Saved 3 screenshots to \(dir.path)" : "\(failures) screenshot(s) failed")
+        print(failures == 0 ? "Saved 4 screenshots to \(dir.path)" : "\(failures) screenshot(s) failed")
         return failures == 0 ? 0 : 1
     }
 

@@ -72,17 +72,52 @@ enum PresetImporter {
     private static let preampRegex = try! NSRegularExpression(
         pattern: #"Preamp[:\s]\s*(-?[\d.,]+)\s*dB"#, options: [.caseInsensitive]
     )
+    private static let channelRegex = try! NSRegularExpression(
+        pattern: #"^\s*Channel\s*:\s*(.+?)\s*$"#, options: [.caseInsensitive]
+    )
+
+    /// Equalizer APO `Channel:` targets. nil means a channel OnlyEQ does not
+    /// have (C, SUB, ...), whose filters are skipped.
+    static func bandChannel(fromChannelList list: String) -> BandChannel? {
+        let tokens = Set(list.uppercased().split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "," }).map(String.init))
+        if tokens.contains("ALL") { return .both }
+        let left = tokens.contains("L") || tokens.contains("1")
+        let right = tokens.contains("R") || tokens.contains("2")
+        switch (left, right) {
+        case (true, true): return .both
+        case (true, false): return .left
+        case (false, true): return .right
+        default: return nil
+        }
+    }
 
     static func parseParametricText(_ text: String) throws -> ImportResult {
         var bands: [EQBand] = []
         var warnings: [String] = []
         var preamp: Double = 0
+        var channel: BandChannel? = .both
+        var sawChannelLine = false
+        // After the first `Channel:` line, APO preamps add up per channel.
+        var channelPreamp = (left: 0.0, right: 0.0)
+        var skippedChannels = false
         let isREW = text.contains("Room EQ") || text.contains("Filter Settings file")
 
         for line in text.components(separatedBy: .newlines) {
             let ns = line as NSString
+            if let m = channelRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+                if !sawChannelLine { channelPreamp = (preamp, preamp) }
+                channel = bandChannel(fromChannelList: ns.substring(with: m.range(at: 1)))
+                sawChannelLine = true
+                continue
+            }
             if let m = preampRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
-                preamp = parseNumber(ns.substring(with: m.range(at: 1))) ?? 0
+                let value = parseNumber(ns.substring(with: m.range(at: 1))) ?? 0
+                if sawChannelLine {
+                    if channel?.applies(toChannel: 0) == true { channelPreamp.left += value }
+                    if channel?.applies(toChannel: 1) == true { channelPreamp.right += value }
+                } else {
+                    preamp = value
+                }
                 continue
             }
             guard let m = filterLineRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) else { continue }
@@ -116,10 +151,19 @@ enum PresetImporter {
             guard fc > 0 else { continue }
             // Skip zero-gain padding bands (Qudelix exports pad with OFF PK 0 dB).
             if onOff == "OFF" && gain == 0 && type == .peak { continue }
-            bands.append(EQBand(type: type, frequency: fc, gain: gain, q: q, isEnabled: onOff != "OFF"))
+            guard let channel else { skippedChannels = true; continue }
+            bands.append(EQBand(type: type, frequency: fc, gain: gain, q: q, isEnabled: onOff != "OFF", channel: channel))
         }
 
         guard !bands.isEmpty else { throw ImportError.unrecognized }
+        if skippedChannels { warnings.append("Skipped filters for channels other than left and right.") }
+        if sawChannelLine {
+            // OnlyEQ has one preamp; keep the lower so neither channel clips.
+            preamp = min(channelPreamp.left, channelPreamp.right)
+            if channelPreamp.left != channelPreamp.right {
+                warnings.append("Left and right had different preamps; using the lower one, \(preamp) dB.")
+            }
+        }
         // REW files often carry no preamp; leave 0 and let auto-preamp handle it.
         if isREW && preamp == 0 { warnings.append("REW file has no preamp — auto-preamp will be applied.") }
         let format = isREW ? "REW filter settings" : "AutoEq / Equalizer APO parametric"

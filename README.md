@@ -31,9 +31,12 @@ Version 1.2.4 therefore starts a new signing chain with a backed-up key and a se
 
 <p align="center">
   <img src="docs/screenshots/editor.png" width="760" alt="OnlyEQ parametric editor">
+  <img src="docs/screenshots/editor-channels.png" width="760" alt="OnlyEQ editor with separate left and right bands">
 </p>
 
 - Parametric EQ with a draggable curve editor. Peak, shelves, high/low pass, notch, band pass — as many bands as you want.
+- Separate left and right EQ when you need it: switch any band to L or R only, and the curve splits to show each channel. Reads and writes Equalizer APO `Channel:` blocks, so per-channel REW and AutoEq exports load as-is.
+- Exports the current preset as Equalizer APO / AutoEq text or OnlyEQ JSON.
 - Imports every headphone EQ format I could find: AutoEq, Equalizer APO, peqdb, Wavelet/GraphicEQ, Poweramp, OPRA, Peace, REW, eqMac. Drop a file, paste text, or search the peqdb and AutoEq databases from inside the app.
 - Per-device profiles. Your headphone preset kicks in when the headphones connect; your speakers keep theirs.
 - Volume boost up to 200%, automatic preamp so boosted EQ doesn't clip, a limiter as a safety net, A/B compare, one-click bypass.
