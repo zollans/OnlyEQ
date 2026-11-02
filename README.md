@@ -31,6 +31,7 @@ Version 1.2.4 therefore starts a new signing chain with a backed-up key and a se
 
 <p align="center">
   <img src="docs/screenshots/editor.png" width="760" alt="OnlyEQ parametric editor">
+  <img src="docs/screenshots/editor-channels.png" width="760" alt="OnlyEQ editor with separate left and right bands">
 </p>
 
 - Parametric EQ with a draggable curve editor. Peak, shelves, high/low pass, notch, band pass — as many bands as you want.
