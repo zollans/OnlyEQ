@@ -3,19 +3,24 @@
     <channel>
         <title>OnlyEQ</title>
         <item>
-            <title>1.2.7</title>
-            <pubDate>Wed, 19 Aug 2026 19:40:33 -0700</pubDate>
+            <title>1.3.0</title>
+            <pubDate>Mon, 02 Nov 2026 19:45:49 +0800</pubDate>
             <link>https://github.com/zollans/OnlyEQ</link>
-            <sparkle:version>23</sparkle:version>
-            <sparkle:shortVersionString>1.2.7</sparkle:shortVersionString>
+            <sparkle:version>24</sparkle:version>
+            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.2.7
+            <description sparkle:format="markdown"><![CDATA[# OnlyEQ 1.3.0
 
-- Restores Command-A, Command-C, Command-V, Command-X, and undo/redo in text fields while OnlyEQ runs as a menu-bar accessory.
-- Adds Command-S for visible “Save as preset” actions and Command-W for closing the active OnlyEQ window.
-- Shows a clear format error after pasted EQ text cannot be recognized instead of silently doing nothing.
+- Adds separate left and right EQ: switch any band to L or R only with the toggles on its card, and the curve splits to show each channel. Equalizer APO `Channel:` blocks in REW and AutoEq exports now import as-is.
+- Adds **Export…** next to Import: save the current preset as Equalizer APO / AutoEq text or OnlyEQ JSON. Thanks to @jayeshmann.
+- Smoother EQ curves, a highlighted shape for the selected band, and a band strip that fades at its edges instead of cutting off the last card.
+- Bypass no longer jumps playback to full volume on devices without hardware volume control.
+- Moves an unreadable preset file aside instead of overwriting it, so a damaged file can no longer wipe your presets.
+- Imports filter lines that have no Gain value (high-pass, low-pass and similar), which were silently dropped before.
+- Typing into a field shown as "1.5 kHz" now edits the exact value instead of reading it as 1.5 Hz.
+- Removes memory allocation from the audio thread, and fixes Reset Everything, the Show latency setting, apps excluded after launch, and Command shortcuts on non-Latin keyboard layouts. Thanks to @maltemoeser.
 ]]></description>
-            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.2.7/OnlyEQ.app.zip" length="2742855" type="application/octet-stream" sparkle:edSignature="dLf1+yYJLsk8if3RN8V/8OUAd5ZfVFULgKmsf9Qfi/LHcdeFVd7tiw4640/O0iIyDygAkrCo1qABG2NcYvzaBg=="/>
+            <enclosure url="https://github.com/zollans/OnlyEQ/releases/download/v1.3.0/OnlyEQ.app.zip" length="2861288" type="application/octet-stream" sparkle:edSignature="CnNc44+EiQeIn0MOup5fBh5PanQ/HmtqeoR+N842/B/WXbIqw5TPgsOSXmWpMKkPh0EO10oNp87FLRfOq0pOCg=="/>
         </item>
     </channel>
 </rss>
