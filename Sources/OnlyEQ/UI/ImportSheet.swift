@@ -16,6 +16,7 @@ struct ImportSheet: View {
 
     // Paste tab.
     @State private var pastedText = ""
+    @State private var parseTask: Task<Void, Never>?
 
     // Browse tab.
     @State private var searchText = ""
@@ -23,6 +24,7 @@ struct ImportSheet: View {
     @State private var selectedEntry: OnlineEntry?
     @State private var previewPreset: EQPreset?
     @State private var isFetchingPreview = false
+    @State private var previewTask: Task<Void, Never>?
     @State private var attemptedAutomaticSelection = false
 
     init(profileSuggestion: ProfileSuggestion? = nil) {
@@ -149,22 +151,22 @@ struct ImportSheet: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .task(id: pastedText) {
-                    let text = pastedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                // onChange rather than .task(id:) so switching to this tab
+                // does not re-run the handler and clear a preset staged from
+                // the Drop or Browse tab.
+                .onChange(of: pastedText) { _, newText in
+                    parseTask?.cancel()
+                    let text = newText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else {
                         staged = nil
                         errorMessage = nil
                         return
                     }
-
-                    // Let multi-line paste and ordinary typing settle before
-                    // parsing. A new edit automatically cancels this task.
-                    do {
-                        try await Task.sleep(for: .milliseconds(250))
-                    } catch {
-                        return
+                    // Let multi-line paste and ordinary typing settle before parsing.
+                    parseTask = Task {
+                        guard (try? await Task.sleep(for: .milliseconds(250))) != nil else { return }
+                        stage { try PresetImporter.importText(text) }
                     }
-                    stage { try PresetImporter.importText(text) }
                 }
             stagedPreview
         }
@@ -294,6 +296,11 @@ struct ImportSheet: View {
                 }
                 .font(.system(size: 10))
                 Spacer()
+            } else if let errorMessage {
+                Spacer()
+                Label(errorMessage, systemImage: "xmark.octagon")
+                    .font(.system(size: 11)).foregroundStyle(.red)
+                Spacer()
             } else {
                 Spacer()
                 Text("Select a headphone to preview its EQ")
@@ -307,16 +314,22 @@ struct ImportSheet: View {
 
     private func fetchPreview() {
         guard let entry = selectedEntry else { return }
+        previewTask?.cancel()
         isFetchingPreview = true
         previewPreset = nil
+        staged = nil
         errorMessage = nil
-        Task {
-            defer { isFetchingPreview = false }
+        previewTask = Task {
+            // A newer selection cancels this task; only the latest publishes.
             do {
                 let preset = try await OnlineDatabase.fetchPreset(for: entry)
+                guard !Task.isCancelled else { return }
+                isFetchingPreview = false
                 previewPreset = preset
                 staged = PresetImporter.ImportResult(preset: preset, detectedFormat: entry.source.rawValue)
             } catch {
+                guard !Task.isCancelled else { return }
+                isFetchingPreview = false
                 errorMessage = "Couldn’t fetch preset: \(error.localizedDescription)"
             }
         }
@@ -352,8 +365,7 @@ struct ImportSheet: View {
             if staged != nil, tab == .browse {
                 Button("Save as preset…") {
                     if let staged {
-                        state.store.save(staged.preset)
-                        state.apply(staged.preset)
+                        state.apply(state.store.save(staged.preset))
                         dismiss()
                     }
                 }
@@ -379,13 +391,13 @@ struct ImportSheet: View {
         .padding(12)
     }
 
-    private func stage(silent: Bool = false, _ work: () throws -> PresetImporter.ImportResult) {
+    private func stage(_ work: () throws -> PresetImporter.ImportResult) {
         do {
             staged = try work()
             errorMessage = nil
         } catch {
             staged = nil
-            if !silent { errorMessage = error.localizedDescription }
+            errorMessage = error.localizedDescription
         }
     }
 }

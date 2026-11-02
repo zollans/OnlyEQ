@@ -140,6 +140,17 @@ enum TestRunner {
         r = try PresetImporter.importText("Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB BW Oct 1")
         expect(near(r.preset.bands[0].q, 1.414, 0.01), "BW Oct → Q conversion")
 
+        r = try PresetImporter.importText("""
+            Filter 1: ON HP Fc 80 Hz
+            Filter 2: ON LPQ Fc 12000 Hz Q 0.707
+            Filter 3: ON AP Fc 1000 Hz Q 0.7
+            Filter 4: ON PK Fc 1000 Hz Gain -3 dB Q 1
+            """)
+        expect(r.preset.bands.count == 3, "gain-less filter lines are imported")
+        expect(r.preset.bands[0].type == .highPass && r.preset.bands[0].gain == 0, "HP line without gain")
+        expect(r.preset.bands[1].type == .lowPass && near(r.preset.bands[1].q, 0.707), "LPQ line keeps Q")
+        expect(r.warnings.contains { $0.contains("all-pass") }, "all-pass filter is reported as skipped")
+
         do {
             _ = try PresetImporter.importText("hello world, no EQ here")
             expect(false, "unrecognized input throws")
@@ -220,6 +231,19 @@ enum TestRunner {
 
             let reloaded = PresetStore(directory: dir)
             expect(reloaded.workingPreset(forDevice: "uid-a") == edited, "working preset stash persists to disk")
+
+            let presetsURL = dir.appendingPathComponent("presets.json")
+            try? "{not json".data(using: .utf8)!.write(to: presetsURL)
+            let corrupt = PresetStore(directory: dir)
+            corrupt.save(edited)
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            expect(files.contains { $0.hasPrefix("presets.json.corrupt-") }, "undecodable presets.json is moved aside")
+            expect(corrupt.customPresets == [edited], "store recovers to a fresh presets.json")
+
+            let replacement = EQPreset(name: "Working", preampDB: 0, bands: [EQBand(type: .peak, frequency: 500, gain: 2, q: 1)])
+            let stored = corrupt.save(replacement)
+            expect(stored.id == edited.id && stored.bands == replacement.bands, "saving under an existing name returns the stored id")
+            expect(corrupt.customPresets.count == 1, "saving under an existing name replaces, not appends")
         }
     }
 
@@ -262,6 +286,38 @@ enum TestRunner {
         }
         let filteredPeak = filteredSine[2400...].map(abs).max() ?? 0
         expect(abs(filteredPeak - 0.2) < 0.01, "processor applies biquad gain at center frequency")
+
+        // A same-topology update (gain tweak) must keep the filter history:
+        // continuing the sine without a discontinuity stays at the new level.
+        filterProc.update(bands: [EQBand(type: .peak, frequency: 1000, gain: 6.1, q: 1.41)],
+                          preampDB: 0, limiterEnabled: false, limiterCeilingDB: -1, bypassed: false)
+        var continued = (4800..<9600).map { Float(0.1 * sin(Double($0) * 2 * .pi * 1000 / 48000)) }
+        continued.withUnsafeMutableBufferPointer { buffer in
+            filterProc.process(channels: [buffer.baseAddress!], frameCount: buffer.count)
+        }
+        let continuedPeak = continued[..<480].map(abs).max() ?? 0
+        expect(abs(continuedPeak - 0.2) < 0.02, "same-topology update keeps filter history")
+
+        // A band-count change adopts fresh, zeroed history sized for the new topology.
+        filterProc.update(bands: [EQBand(type: .peak, frequency: 1000, gain: 6, q: 1.41),
+                                  EQBand(type: .peak, frequency: 2000, gain: 0, q: 1.41)],
+                          preampDB: 0, limiterEnabled: false, limiterCeilingDB: -1, bypassed: false)
+        var twoBand = (0..<4800).map { Float(0.1 * sin(Double($0) * 2 * .pi * 1000 / 48000)) }
+        twoBand.withUnsafeMutableBufferPointer { buffer in
+            filterProc.process(channels: [buffer.baseAddress!], frameCount: buffer.count)
+        }
+        let twoBandPeak = twoBand[2400...].map(abs).max() ?? 0
+        expect(abs(twoBandPeak - 0.2) < 0.01, "band-count change keeps processing correctly")
+
+        let bypassProc = EQProcessor()
+        bypassProc.configure(sampleRate: 48000)
+        bypassProc.update(bands: [EQBand(type: .peak, frequency: 1000, gain: 6, q: 1.41)],
+                          preampDB: -6, outputGainDB: -6.02, limiterEnabled: false, limiterCeilingDB: -1, bypassed: true)
+        var bypassed = [Float](repeating: 1.0, count: 512)
+        bypassed.withUnsafeMutableBufferPointer { buf in
+            bypassProc.process(channels: [buf.baseAddress!], frameCount: 512)
+        }
+        expect(abs(bypassed[100] - 0.5) < 0.01, "bypass keeps output gain but skips preamp and bands")
 
         let limProc = EQProcessor()
         limProc.configure(sampleRate: 48000)

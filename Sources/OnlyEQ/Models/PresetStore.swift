@@ -40,17 +40,22 @@ final class PresetStore: ObservableObject {
         return allPresets.first { $0.name == name }
     }
 
-    func save(_ preset: EQPreset) {
+    /// Saves the preset and returns the stored value. Saving under an existing
+    /// name replaces that preset and keeps its id, so callers must use the
+    /// returned preset rather than the one they passed in.
+    @discardableResult
+    func save(_ preset: EQPreset) -> EQPreset {
+        var stored = preset
         if let i = customPresets.firstIndex(where: { $0.id == preset.id }) {
             customPresets[i] = preset
         } else if let i = customPresets.firstIndex(where: { $0.name == preset.name }) {
-            var updated = preset
-            updated.id = customPresets[i].id
-            customPresets[i] = updated
+            stored.id = customPresets[i].id
+            customPresets[i] = stored
         } else {
             customPresets.append(preset)
         }
         persist()
+        return stored
     }
 
     func delete(_ preset: EQPreset) {
@@ -59,6 +64,13 @@ final class PresetStore: ObservableObject {
             deviceProfiles[uid]?.presetID = nil
             deviceProfiles[uid]?.presetName = nil
         }
+        persist()
+    }
+
+    func removeAll() {
+        customPresets = []
+        deviceProfiles = [:]
+        workingPresets = [:]
         persist()
     }
 
@@ -83,17 +95,23 @@ final class PresetStore: ObservableObject {
     // MARK: - Persistence
 
     private func load() {
-        if let data = try? Data(contentsOf: presetsURL),
-           let presets = try? JSONDecoder().decode([EQPreset].self, from: data) {
-            customPresets = presets
-        }
-        if let data = try? Data(contentsOf: profilesURL),
-           let profiles = try? JSONDecoder().decode([String: DeviceProfile].self, from: data) {
-            deviceProfiles = profiles
-        }
-        if let data = try? Data(contentsOf: workingURL),
-           let working = try? JSONDecoder().decode([String: EQPreset].self, from: data) {
-            workingPresets = working
+        if let presets: [EQPreset] = loadFile(presetsURL) { customPresets = presets }
+        if let profiles: [String: DeviceProfile] = loadFile(profilesURL) { deviceProfiles = profiles }
+        if let working: [String: EQPreset] = loadFile(workingURL) { workingPresets = working }
+    }
+
+    /// A missing file is normal (first launch). A file that exists but does
+    /// not decode is moved aside so the next persist() cannot overwrite it
+    /// with the empty in-memory state.
+    private func loadFile<T: Decodable>(_ url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            let backup = url.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
+            try? FileManager.default.moveItem(at: url, to: backup)
+            Log.write("PresetStore: could not decode \(url.lastPathComponent), moved to \(backup.lastPathComponent): \(error)")
+            return nil
         }
     }
 

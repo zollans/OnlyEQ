@@ -65,7 +65,8 @@ enum PresetImporter {
     // MARK: - Parametric text (AutoEq / Equalizer APO / REW / peqdb / Qudelix)
 
     private static let filterLineRegex = try! NSRegularExpression(
-        pattern: #"Filter\s*\d+[:\s]\s*(ON|OFF)?\s*([A-Z]+(?:\s+(?:6|12)\s*dB)?)\s+Fc\s+([\d.,]+)\s*k?Hz\s+Gain\s+(-?[\d.,]+)\s*dB(?:\s+(Q|BW\s+Oct)\s+([\d.,]+))?"#,
+        // Gain is optional: APO/REW/AutoEq write LP, HP, BP, NO and AP lines without it.
+        pattern: #"Filter\s*\d+[:\s]\s*(ON|OFF)?\s*([A-Z]+(?:\s+(?:6|12)\s*dB)?)\s+Fc\s+([\d.,]+)\s*k?Hz(?:\s+Gain\s+(-?[\d.,]+)\s*dB)?(?:\s+(Q|BW\s+Oct)\s+([\d.,]+))?"#,
         options: [.caseInsensitive]
     )
     private static let preampRegex = try! NSRegularExpression(
@@ -91,7 +92,7 @@ enum PresetImporter {
                 .replacingOccurrences(of: " ", with: "")
             var fc = parseNumber(ns.substring(with: m.range(at: 3))) ?? 0
             if line.lowercased().contains("khz") { fc *= 1000 }
-            let gain = parseNumber(ns.substring(with: m.range(at: 4))) ?? 0
+            let gain = m.range(at: 4).location != NSNotFound ? parseNumber(ns.substring(with: m.range(at: 4))) ?? 0 : 0
 
             var q = 0.707
             if m.range(at: 5).location != NSNotFound, m.range(at: 6).location != NSNotFound {
@@ -114,7 +115,7 @@ enum PresetImporter {
             // Fixed-slope shelves (LS 6dB etc.) have no Q — Butterworth default.
             guard fc > 0 else { continue }
             // Skip zero-gain padding bands (Qudelix exports pad with OFF PK 0 dB).
-            if onOff == "OFF" && gain == 0 { continue }
+            if onOff == "OFF" && gain == 0 && type == .peak { continue }
             bands.append(EQBand(type: type, frequency: fc, gain: gain, q: q, isEnabled: onOff != "OFF"))
         }
 

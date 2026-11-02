@@ -156,6 +156,17 @@ final class AppState: ObservableObject {
         }
         rebuildEngine()
         startSilenceWatchdog()
+        // Tap exclusions are resolved to PIDs when the tap is created, so an
+        // excluded app launched later would be tapped until the next rebuild.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
+            Task { @MainActor in
+                guard let self, let bundleID, self.excludedBundleIDs.contains(bundleID) else { return }
+                self.rebuildEngine()
+            }
+        }
     }
 
     // MARK: - Engine control
@@ -462,17 +473,36 @@ final class AppState: ObservableObject {
 
     func applyFlat() { apply(.flat) }
 
+    /// "Reset Everything" in Settings: presets, device profiles, working
+    /// state, and every preference back to first-launch defaults.
+    func resetToDefaults() {
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
+        store.removeAll()
+        suggestedDeviceUIDs = []
+        isEnabled = true
+        autoPreampEnabled = true
+        limiterEnabled = true
+        limiterCeilingDB = -1
+        maxBoostPercent = 200
+        excludedBundleIDs = ["com.apple.garageband10", "us.zoom.xos"]
+        bufferFrames = 256
+        autoSuggestHeadphoneProfiles = true
+        applyFlat()
+        userVolumePercent = 100
+    }
+
     func saveCurrentAsPreset(named name: String) {
         var toSave = preset
         toSave.id = UUID()
         toSave.name = name
-        store.save(toSave)
-        preset = toSave
+        preset = store.save(toSave)
         presetWasAutoApplied = false
     }
 
-    func assignSuggestedPreset(_ preset: EQPreset, to suggestion: ProfileSuggestion) {
-        store.save(preset)
+    func assignSuggestedPreset(_ suggested: EQPreset, to suggestion: ProfileSuggestion) {
+        let preset = store.save(suggested)
         store.setProfile(deviceUID: suggestion.deviceUID, deviceName: suggestion.deviceName,
                          preset: preset, autoApply: true)
         // An explicit assignment beats whatever working state was stashed for

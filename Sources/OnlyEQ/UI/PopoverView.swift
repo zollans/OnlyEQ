@@ -24,6 +24,7 @@ struct Card<Content: View>: View {
 /// volume, preset card, curve preview, footer.
 struct PopoverView: View {
     @EnvironmentObject var state: AppState
+    @AppStorage("showLatency") private var showLatency = true
 
     var body: some View {
         VStack(spacing: 10) {
@@ -272,7 +273,9 @@ struct PopoverView: View {
     private var statusText: String {
         guard state.isEnabled else { return "Inactive" }
         switch state.engineState {
-        case .running: return state.suspectedPermissionIssue ? "Waiting for audio" : "Active · \(state.latencyMilliseconds) ms"
+        case .running:
+            if state.suspectedPermissionIssue { return "Waiting for audio" }
+            return showLatency ? "Active · \(state.latencyMilliseconds) ms" : "Active"
         case .stopped: return "Inactive"
         case .failed: return "Error"
         }
