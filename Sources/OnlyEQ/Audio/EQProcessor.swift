@@ -40,8 +40,9 @@ final class EQProcessor {
     // Render-thread state (only touched on the audio thread).
     private var states: [BiquadState] = []  // flattened [channel][band]
     private var stateStride = 0
-    private var limiterEnvelope: Float = 0
-    private var limiterAttack = Float(exp(-1.0 / (0.001 * 48000)))
+    /// Applied limiter gain (1 = untouched). Attack is instantaneous so the
+    /// ceiling is a hard guarantee on every sample; only recovery is smoothed.
+    private var limiterGain: Float = 1
     private var limiterRelease = Float(exp(-1.0 / (0.080 * 48000)))
     private(set) var sampleRate: Double = 48000
 
@@ -61,7 +62,6 @@ final class EQProcessor {
 
     func configure(sampleRate: Double) {
         self.sampleRate = sampleRate
-        limiterAttack = Float(exp(-1.0 / (0.001 * sampleRate)))
         limiterRelease = Float(exp(-1.0 / (0.080 * sampleRate)))
     }
 
@@ -79,7 +79,7 @@ final class EQProcessor {
     /// avoids allocating from the realtime callback.
     func resetRenderState() {
         for index in states.indices { states[index] = BiquadState() }
-        limiterEnvelope = 0
+        limiterGain = 1
     }
 
     /// Called from the UI/model thread whenever parameters change.
@@ -131,7 +131,7 @@ final class EQProcessor {
                     // with the previous snapshot.
                     swap(&states, &snapshot.freshStates)
                     stateStride = snapshot.stride
-                    limiterEnvelope = 0
+                    limiterGain = 1
                 }
             }
             os_unfair_lock_unlock(&lock)
@@ -179,12 +179,23 @@ final class EQProcessor {
                             maxMag = max(maxMag, abs(sample))
                         }
                         if snap.limiterEnabled {
-                            let coefficient = maxMag > limiterEnvelope ? limiterAttack : limiterRelease
-                            limiterEnvelope = coefficient * limiterEnvelope + (1 - coefficient) * maxMag
-                            if limiterEnvelope > snap.limiterCeilingLinear {
-                                let gain = snap.limiterCeilingLinear / limiterEnvelope
-                                for ch in 0..<channelCount { channelBuffers[ch][frame] *= gain }
-                                maxMag *= gain
+                            // A smoothed envelope is the wrong thing to compare
+                            // against the ceiling: its attack ramp lets the first
+                            // samples of a transient through unattenuated, which
+                            // is the one case a safety limiter exists for. Derive
+                            // the gain from this frame's peak instead, clamping
+                            // immediately and releasing smoothly.
+                            let required = maxMag > 0
+                                ? min(1, snap.limiterCeilingLinear / maxMag) : 1
+                            if required < limiterGain {
+                                limiterGain = required
+                            } else {
+                                limiterGain = limiterRelease * limiterGain + (1 - limiterRelease) * required
+                                if limiterGain > 1 { limiterGain = 1 }
+                            }
+                            if limiterGain < 1 {
+                                for ch in 0..<channelCount { channelBuffers[ch][frame] *= limiterGain }
+                                maxMag *= limiterGain
                             }
                         }
                         if meteringActive { peak = max(peak, maxMag) }

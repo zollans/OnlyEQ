@@ -400,6 +400,52 @@ enum TestRunner {
         let ceiling = pow(10, Float(-1.0) / 20) * 1.05
         expect(sine[2400...].map(abs).max()! <= ceiling, "limiter caps output at ceiling")
 
+        // The ceiling has to hold from the very first over-ceiling sample, not
+        // once a smoothed envelope has caught up. Preamp-boosted EQ turns any
+        // 0 dBFS click into exactly this case, which is what a safety limiter
+        // is for.
+        let transientProc = EQProcessor()
+        transientProc.configure(sampleRate: 48000)
+        transientProc.update(bands: [], preampDB: 6, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false)
+        var click = [Float](repeating: 0, count: 1024)
+        click[256] = 0.99
+        click.withUnsafeMutableBufferPointer { buf in
+            transientProc.process(channels: [buf.baseAddress!], frameCount: buf.count)
+        }
+        expect(click.map(abs).max()! <= pow(10, Float(-1.0) / 20) * 1.0001,
+               "limiter caps a boosted single-sample transient on its first sample")
+        expect(click[256] > 0.5, "limiter attenuates the transient rather than muting it")
+
+        // Below the ceiling the limiter must be transparent.
+        let quietProc = EQProcessor()
+        quietProc.configure(sampleRate: 48000)
+        quietProc.update(bands: [], preampDB: 0, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false)
+        var quiet = (0..<4800).map { Float(0.25 * sin(Double($0) * 2 * .pi * 1000 / 48000)) }
+        quiet.withUnsafeMutableBufferPointer { buf in
+            quietProc.process(channels: [buf.baseAddress!], frameCount: buf.count)
+        }
+        expect(abs(quiet[2400...].map(abs).max()! - 0.25) < 0.001,
+               "limiter leaves below-ceiling material untouched")
+
+        // Engagement must not latch: once the signal drops back under the
+        // ceiling the gain returns to unity, so a loud moment does not leave
+        // everything after it permanently quiet.
+        let recoverProc = EQProcessor()
+        recoverProc.configure(sampleRate: 48000)
+        recoverProc.update(bands: [], preampDB: 0, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false)
+        var burst = [Float](repeating: 0, count: 4800)
+        for i in 0..<4800 { burst[i] = Float(sin(Double(i) * 2 * .pi * 1000 / 48000)) }
+        burst.withUnsafeMutableBufferPointer { buf in
+            recoverProc.process(channels: [buf.baseAddress!], frameCount: buf.count)
+        }
+        var recovered = [Float](repeating: 0, count: 48000)
+        for i in 0..<48000 { recovered[i] = Float(0.25 * sin(Double(i) * 2 * .pi * 500 / 48000)) }
+        recovered.withUnsafeMutableBufferPointer { buf in
+            recoverProc.process(channels: [buf.baseAddress!], frameCount: buf.count)
+        }
+        expect(abs(recovered[40000...].map(abs).max()! - 0.25) < 0.005,
+               "limiter recovers to unity after a transient")
+
         let analyzer = SpectrumAnalyzer()
         analyzer.configure(sampleRate: 48000)
         analyzer.setActive(true)
