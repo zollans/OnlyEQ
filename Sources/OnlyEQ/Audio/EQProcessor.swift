@@ -1,7 +1,7 @@
 import Foundation
 import os.lock
 
-/// Realtime-safe EQ chain: preamp → biquad cascade → soft limiter → output gain.
+/// Realtime-safe EQ chain: preamp → biquad cascade → output gain → peak limiter.
 ///
 /// The UI thread rebuilds a `Snapshot` and swaps it in under a lock; the render
 /// thread try-locks — if the lock is contended it keeps using the old snapshot
@@ -40,8 +40,13 @@ final class EQProcessor {
     // Render-thread state (only touched on the audio thread).
     private var states: [BiquadState] = []  // flattened [channel][band]
     private var stateStride = 0
-    private var limiterEnvelope: Float = 0
-    private var limiterAttack = Float(exp(-1.0 / (0.001 * 48000)))
+    /// Applied limiter gain (1 = untouched). Attack is instantaneous so the
+    /// ceiling is a hard guarantee on every sample; only recovery is smoothed.
+    private var limiterGain: Float = 1
+    /// Frames left before release starts. Holding through a waveform cycle
+    /// keeps the gain flat under sustained limiting instead of rippling.
+    private var limiterHoldRemaining = 0
+    private var limiterHoldFrames = Int(0.025 * 48000)
     private var limiterRelease = Float(exp(-1.0 / (0.080 * 48000)))
     private(set) var sampleRate: Double = 48000
 
@@ -61,7 +66,7 @@ final class EQProcessor {
 
     func configure(sampleRate: Double) {
         self.sampleRate = sampleRate
-        limiterAttack = Float(exp(-1.0 / (0.001 * sampleRate)))
+        limiterHoldFrames = Int(0.025 * sampleRate)
         limiterRelease = Float(exp(-1.0 / (0.080 * sampleRate)))
     }
 
@@ -79,7 +84,8 @@ final class EQProcessor {
     /// avoids allocating from the realtime callback.
     func resetRenderState() {
         for index in states.indices { states[index] = BiquadState() }
-        limiterEnvelope = 0
+        limiterGain = 1
+        limiterHoldRemaining = 0
     }
 
     /// Called from the UI/model thread whenever parameters change.
@@ -126,12 +132,15 @@ final class EQProcessor {
             if hasPending {
                 swap(&snapshot, &pending)
                 hasPending = false
+                if !snapshot.limiterEnabled {
+                    limiterGain = 1
+                    limiterHoldRemaining = 0
+                }
                 if snapshot.stride != stateStride {
                     // Adopt the preallocated history; the old one retires
                     // with the previous snapshot.
                     swap(&states, &snapshot.freshStates)
                     stateStride = snapshot.stride
-                    limiterEnvelope = 0
                 }
             }
             os_unfair_lock_unlock(&lock)
@@ -152,6 +161,8 @@ final class EQProcessor {
 
         let meteringActive = meter.withLockIfAvailable { $0.isActive } ?? false
         var peak: Float = 0
+        var gain = limiterGain
+        var hold = limiterHoldRemaining
 
         // Work through raw buffers so mutating filter state does not trigger an
         // Array copy-on-write uniqueness check for every sample and band.
@@ -179,10 +190,28 @@ final class EQProcessor {
                             maxMag = max(maxMag, abs(sample))
                         }
                         if snap.limiterEnabled {
-                            let coefficient = maxMag > limiterEnvelope ? limiterAttack : limiterRelease
-                            limiterEnvelope = coefficient * limiterEnvelope + (1 - coefficient) * maxMag
-                            if limiterEnvelope > snap.limiterCeilingLinear {
-                                let gain = snap.limiterCeilingLinear / limiterEnvelope
+                            // A smoothed envelope is the wrong thing to compare
+                            // against the ceiling: its attack ramp lets the first
+                            // samples of a transient through unattenuated, which
+                            // is the one case a safety limiter exists for. Derive
+                            // the gain from this frame's peak instead, clamping
+                            // immediately and releasing smoothly.
+                            let ceiling = snap.limiterCeilingLinear
+                            let required = maxMag > ceiling ? ceiling / maxMag : 1
+                            if required < gain {
+                                gain = required
+                                hold = limiterHoldFrames
+                            } else if maxMag * gain >= ceiling * 0.98 {
+                                hold = limiterHoldFrames
+                            } else if hold > 0 {
+                                hold -= 1
+                            } else {
+                                gain = limiterRelease * gain + (1 - limiterRelease) * required
+                                // Float rounding stalls the one-pole just short
+                                // of its target, so finish the last step.
+                                if required - gain < 0.001 { gain = required }
+                            }
+                            if gain < 1 {
                                 for ch in 0..<channelCount { channelBuffers[ch][frame] *= gain }
                                 maxMag *= gain
                             }
@@ -192,6 +221,9 @@ final class EQProcessor {
                 }
             }
         }
+
+        limiterGain = gain
+        limiterHoldRemaining = hold
 
         if meteringActive {
             let framePeak = peak
