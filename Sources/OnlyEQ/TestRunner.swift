@@ -416,6 +416,22 @@ enum TestRunner {
                "limiter caps a boosted single-sample transient on its first sample")
         expect(click[256] > 0.5, "limiter attenuates the transient rather than muting it")
 
+        // The limiter is stereo-linked: a peak on one side turns both down
+        // by the same amount, so the image doesn't shift.
+        let linkedProc = EQProcessor()
+        linkedProc.configure(sampleRate: 48000)
+        linkedProc.update(bands: [], preampDB: 0, limiterEnabled: true, limiterCeilingDB: -1, bypassed: false)
+        var linkedLeft = [Float](repeating: 0, count: 1024)
+        var linkedRight = [Float](repeating: 0.4, count: 1024)
+        linkedLeft[256] = 0.99
+        linkedLeft.withUnsafeMutableBufferPointer { l in
+            linkedRight.withUnsafeMutableBufferPointer { r in
+                linkedProc.process(channels: [l.baseAddress!, r.baseAddress!], frameCount: l.count)
+            }
+        }
+        expect(linkedLeft[256] < 0.99 && abs(linkedRight[256] / 0.4 - linkedLeft[256] / 0.99) < 0.0001,
+               "limiter applies the same gain to both channels")
+
         // Below the ceiling the limiter must be transparent.
         let quietProc = EQProcessor()
         quietProc.configure(sampleRate: 48000)
@@ -440,10 +456,11 @@ enum TestRunner {
         }
         var recovered = [Float](repeating: 0, count: 48000)
         for i in 0..<48000 { recovered[i] = Float(0.25 * sin(Double(i) * 2 * .pi * 500 / 48000)) }
+        let unprocessed = recovered
         recovered.withUnsafeMutableBufferPointer { buf in
             recoverProc.process(channels: [buf.baseAddress!], frameCount: buf.count)
         }
-        expect(abs(recovered[40000...].map(abs).max()! - 0.25) < 0.005,
+        expect(recovered[40000...].elementsEqual(unprocessed[40000...]),
                "limiter recovers to unity after a transient")
 
         let analyzer = SpectrumAnalyzer()
