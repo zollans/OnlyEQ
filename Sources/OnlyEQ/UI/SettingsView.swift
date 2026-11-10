@@ -1,21 +1,85 @@
 import SwiftUI
 import ServiceManagement
 
+enum SettingsPane: Int, CaseIterable {
+    case general, devices, shortcuts, advanced
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .devices: "Devices"
+        case .shortcuts: "Shortcuts"
+        case .advanced: "Advanced"
+        }
+    }
+}
+
+@MainActor
+final class SettingsSelection: ObservableObject {
+    @Published var pane = SettingsPane.general
+}
+
 struct SettingsView: View {
-    @EnvironmentObject var state: AppState
+    @ObservedObject var selection: SettingsSelection
 
     var body: some View {
-        TabView {
-            GeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            DeviceSettings()
-                .tabItem { Label("Devices", systemImage: "headphones") }
-            ShortcutSettings()
-                .tabItem { Label("Shortcuts", systemImage: "command") }
-            AdvancedSettings()
-                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+        Group {
+            switch selection.pane {
+            case .general: GeneralSettings()
+            case .devices: DeviceSettings()
+            case .shortcuts: ShortcutSettings()
+            case .advanced: AdvancedSettings()
+            }
         }
         .frame(width: 620, height: 440)
+    }
+}
+
+/// Puts the tabs in the toolbar as a native NSSegmentedControl. SwiftUI's
+/// TabView and segmented Picker snap the selection pill to its destination on
+/// mouse-up, cutting off the slide that began on mouse-down; AppKit's control
+/// keeps animating through the selection change.
+final class SettingsWindow: NSWindow, NSToolbarDelegate {
+    private static let tabsItem = NSToolbarItem.Identifier("settingsTabs")
+    private let selection = SettingsSelection()
+
+    init() {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
+            styleMask: [.titled, .closable],
+            backing: .buffered, defer: false
+        )
+        title = "OnlyEQ Settings"
+        titleVisibility = .hidden
+        isReleasedWhenClosed = false
+        contentViewController = NSHostingController(
+            rootView: SettingsView(selection: selection).environmentObject(AppState.shared)
+        )
+        let toolbar = NSToolbar(identifier: "OnlyEQSettings")
+        toolbar.delegate = self
+        toolbar.centeredItemIdentifiers = [Self.tabsItem]
+        toolbar.displayMode = .iconOnly
+        self.toolbar = toolbar
+        toolbarStyle = .unified
+        center()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.tabsItem] }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.tabsItem] }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let tabs = NSSegmentedControl(labels: SettingsPane.allCases.map(\.title), trackingMode: .selectOne,
+                                      target: self, action: #selector(selectPane(_:)))
+        tabs.selectedSegment = selection.pane.rawValue
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = "Settings"
+        item.view = tabs
+        return item
+    }
+
+    @objc private func selectPane(_ sender: NSSegmentedControl) {
+        selection.pane = SettingsPane(rawValue: sender.selectedSegment) ?? .general
     }
 }
 
