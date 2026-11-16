@@ -263,6 +263,7 @@ struct PopoverView: View {
 
     private var statusColor: Color {
         guard state.isEnabled else { return .secondary }
+        if state.isIdleReleased { return .green }
         switch state.engineState {
         case .running: return state.suspectedPermissionIssue ? .orange : .green
         case .stopped: return .secondary
@@ -272,6 +273,7 @@ struct PopoverView: View {
 
     private var statusText: String {
         guard state.isEnabled else { return "Inactive" }
+        if state.isIdleReleased { return "Idle · wakes on sound" }
         switch state.engineState {
         case .running:
             if state.suspectedPermissionIssue { return "Waiting for audio" }

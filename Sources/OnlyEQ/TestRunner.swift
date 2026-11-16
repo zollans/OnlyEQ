@@ -766,6 +766,14 @@ enum TestRunner {
         expect(
             AppState.topologyAction(
                 isEnabled: true, engineIsRunning: false,
+                engineTargetID: 0, defaultDeviceID: 52, defaultDeviceIsReady: true,
+                isIdleReleased: true
+            ) == .none,
+            "idle-released engine is not rebuilt by its own teardown"
+        )
+        expect(
+            AppState.topologyAction(
+                isEnabled: true, engineIsRunning: false,
                 engineTargetID: 0, defaultDeviceID: 52, defaultDeviceIsReady: true
             ) == .rebuild,
             "restored output restarts a fail-safe stopped engine"

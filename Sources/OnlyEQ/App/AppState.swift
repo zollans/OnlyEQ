@@ -138,6 +138,20 @@ final class AppState: ObservableObject {
     /// across launches so an idle Mac never raises a false permission warning.
     private var audioAccessConfirmed = UserDefaults.standard.bool(forKey: "audioAccessConfirmed")
 
+    /// Idle release: after this many seconds with no (non-excluded) app playing,
+    /// the engine tears down its tap and aggregate so Core Audio can stop the
+    /// output device. Otherwise the device runs forever, keeping coreaudiod busy
+    /// and holding a PreventUserIdleSystemSleep assertion (no idle sleep on
+    /// battery). The engine comes back as soon as any app starts playing.
+    /// `defaults write com.onlyeq.app idleReleaseSeconds -float 0` disables it.
+    private var idleReleaseSeconds: Double {
+        UserDefaults.standard.object(forKey: "idleReleaseSeconds") as? Double ?? 20
+    }
+    @Published private(set) var isIdleReleased = false
+    private var idleCheckTimer: Timer?
+    private var lastPlaybackSeen = Date()
+    private var resumeListener: (deviceID: AudioObjectID, block: AudioObjectPropertyListenerBlock)?
+
     // MARK: - Setup
 
     private init() {
@@ -156,6 +170,7 @@ final class AppState: ObservableObject {
         }
         rebuildEngine()
         startSilenceWatchdog()
+        startIdleWatch()
         // Tap exclusions are resolved to PIDs when the tap is created, so an
         // excluded app launched later would be tapped until the next rebuild.
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -173,6 +188,12 @@ final class AppState: ObservableObject {
 
     func rebuildEngine() {
         guard !Self.screenshotMode else { return }
+        // Any rebuild (settings change, device change, resume) leaves idle release.
+        if isIdleReleased {
+            removeResumeListener()
+            isIdleReleased = false
+        }
+        lastPlaybackSeen = Date()
         if isEnabled {
             engineAudioConfirmationLogged = false
             engine.start(excludedBundleIDs: excludedBundleIDs)
@@ -260,6 +281,84 @@ final class AppState: ObservableObject {
         audioAccessConfirmed: Bool
     ) -> Bool {
         isEnabled && engineIsRunning && !hasReceivedAudio && !audioAccessConfirmed
+    }
+
+    // MARK: - Idle release
+
+    private func startIdleWatch() {
+        guard !Self.screenshotMode else { return }
+        idleCheckTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.idleTick() }
+        }
+        idleCheckTimer?.tolerance = 1
+    }
+
+    private func idleTick() {
+        guard isEnabled, idleReleaseSeconds > 0 else { return }
+        let playing = AudioDeviceManager.otherProcessIsPlayingOutput(ignoringBundleIDs: excludedBundleIDs)
+        if isIdleReleased {
+            // Fallback for starts the device listener cannot see, e.g. another
+            // client (an excluded app) already had the device running.
+            if playing { resumeFromIdle(reason: "playback seen") }
+            return
+        }
+        guard engine.state == .running else { return }
+        if playing {
+            lastPlaybackSeen = Date()
+        } else if Date().timeIntervalSince(lastPlaybackSeen) >= idleReleaseSeconds {
+            releaseForIdle()
+        }
+    }
+
+    private func releaseForIdle() {
+        engine.stop()
+        isIdleReleased = true
+        installResumeListener()
+        Log.write("idle: released the output device after \(Int(idleReleaseSeconds)) s without playback")
+    }
+
+    private func resumeFromIdle(reason: String) {
+        guard isIdleReleased else { return }
+        Log.write("idle: resuming (\(reason))")
+        rebuildEngine()   // clears isIdleReleased and the listener, restarts the tap
+    }
+
+    private static let runningSomewhereAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+
+    /// While released, any app that starts playing makes the output device run
+    /// again; resume right then so the EQ is back within a fraction of a second.
+    private func installResumeListener() {
+        removeResumeListener()
+        guard let deviceID = AudioDeviceManager.defaultOutputDeviceID() else { return }
+        var address = Self.runningSomewhereAddress
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor in self?.deviceRunningChanged(deviceID) }
+        }
+        if AudioObjectAddPropertyListenerBlock(deviceID, &address, .main, block) == noErr {
+            resumeListener = (deviceID, block)
+        }
+    }
+
+    private func deviceRunningChanged(_ deviceID: AudioObjectID) {
+        guard isIdleReleased, AudioDeviceManager.isRunningSomewhere(deviceID) else { return }
+        // The player's own "running output" flag can trail the device by a moment.
+        for delay in [0.0, 0.3, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.isIdleReleased,
+                      AudioDeviceManager.otherProcessIsPlayingOutput(ignoringBundleIDs: self.excludedBundleIDs) else { return }
+                self.resumeFromIdle(reason: "output device started")
+            }
+        }
+    }
+
+    private func removeResumeListener() {
+        guard let listener = resumeListener else { return }
+        var address = Self.runningSomewhereAddress
+        AudioObjectRemovePropertyListenerBlock(listener.deviceID, &address, .main, listener.block)
+        resumeListener = nil
     }
 
     // MARK: - Devices
@@ -372,7 +471,8 @@ final class AppState: ObservableObject {
             engineIsRunning: engine.state == .running,
             engineTargetID: engine.targetDeviceID,
             defaultDeviceID: defaultDeviceID,
-            defaultDeviceIsReady: currentDevice != nil
+            defaultDeviceIsReady: currentDevice != nil,
+            isIdleReleased: isIdleReleased
         ) {
         case .stop:
             Log.write("device: output unavailable; stopping muted tap")
@@ -383,6 +483,9 @@ final class AppState: ObservableObject {
         case .none:
             break
         }
+        // While idle, follow the default output so playback on a newly chosen
+        // device still wakes the engine.
+        if isIdleReleased { installResumeListener() }
 
         if let currentDevice, previousUID != currentDevice.uid {
             handledDeviceUID = currentDevice.uid
@@ -402,9 +505,12 @@ final class AppState: ObservableObject {
         engineIsRunning: Bool,
         engineTargetID: AudioObjectID,
         defaultDeviceID: AudioObjectID?,
-        defaultDeviceIsReady: Bool
+        defaultDeviceIsReady: Bool,
+        isIdleReleased: Bool = false
     ) -> AudioTopologyAction {
-        guard isEnabled else { return .none }
+        // An idle-released engine is down on purpose (and tearing it down is
+        // itself a topology change): only real playback brings it back.
+        guard isEnabled, !isIdleReleased else { return .none }
         guard let defaultDeviceID, defaultDeviceIsReady else {
             return engineIsRunning ? .stop : .none
         }

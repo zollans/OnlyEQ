@@ -66,6 +66,8 @@ A muted global process tap silences the original system output; the tap and the 
 
 This is the same approach the newer generation of Mac audio tools moved to after macOS 14.4, and it kills the classic virtual-driver failure modes: Bluetooth devices distorting until reconnect, sample-rate mismatches, apps escaping the EQ because they pin their output device, and the driver breaking on every macOS update.
 
+When no app has played anything for 20 seconds, OnlyEQ tears the tap and aggregate down so Core Audio can stop the output device: the audio server goes quiet and the Mac can idle-sleep again. The moment any app starts playing, the EQ comes back (the first fraction of a second plays unprocessed). `defaults write com.onlyeq.app idleReleaseSeconds -float N` changes the delay; `0` keeps the engine running all the time.
+
 Trade-offs, honestly: the purple recording dot is always on while EQ runs, macOS below 14.4 isn't supported, and pro-audio apps doing their own low-level routing can misbehave with taps — that's what the exclude list is for.
 
 ## Development

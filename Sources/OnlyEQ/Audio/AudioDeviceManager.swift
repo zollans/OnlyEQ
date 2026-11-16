@@ -249,6 +249,36 @@ enum AudioDeviceManager {
             return status == noErr && processObject != 0 ? processObject : nil
         }
     }
+
+    /// True when any process other than this one is running audio output right
+    /// now, ignoring apps in `ignoredBundleIDs` (apps excluded from the EQ do not
+    /// need the engine). Used to release the output device while nothing plays.
+    static func otherProcessIsPlayingOutput(ignoringBundleIDs ignoredBundleIDs: Set<String>) -> Bool {
+        var listAddr = address(kAudioHardwarePropertyProcessObjectList)
+        var size: UInt32 = 0
+        guard CoreAudio.AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &listAddr, 0, nil, &size) == noErr,
+              size > 0 else { return false }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard CoreAudio.AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &listAddr, 0, nil, &size, &objects) == noErr
+        else { return false }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        for object in objects where object != 0 {
+            guard uint32Property(object, kAudioProcessPropertyIsRunningOutput) == 1 else { continue }
+            var pidAddr = address(kAudioProcessPropertyPID)
+            var pid: pid_t = -1
+            var pidSize = UInt32(MemoryLayout<pid_t>.size)
+            if CoreAudio.AudioObjectGetPropertyData(object, &pidAddr, 0, nil, &pidSize, &pid) == noErr, pid == ownPID { continue }
+            if !ignoredBundleIDs.isEmpty, let bundleID = stringProperty(object, kAudioProcessPropertyBundleID),
+               ignoredBundleIDs.contains(bundleID) { continue }
+            return true
+        }
+        return false
+    }
+
+    /// True while any client is doing IO on the device.
+    static func isRunningSomewhere(_ id: AudioObjectID) -> Bool {
+        uint32Property(id, kAudioDevicePropertyDeviceIsRunningSomewhere) == 1
+    }
 }
 
 private func AudioObjectGetPropertyDataSize(_ id: AudioObjectID, _ addr: inout AudioObjectPropertyAddress,
